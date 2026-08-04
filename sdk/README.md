@@ -1,18 +1,23 @@
-# Agent Pontifex protocol and SDK seed
+# Agent Pontifex protocol and SDK compatibility snapshot
 
-This directory is the extraction seed for a future public
-`agent-pontifex/agent-sdk.rs` repository. It lives beside the community bridge
-temporarily so the protocol can be reviewed against a real server before it is
-published and versioned independently.
+The canonical public workspace now lives in
+[`agent-pontifex/agent-sdk.rs`](https://github.com/agent-pontifex/agent-sdk.rs).
+This directory remains temporarily as the history-preserving bridge integration
+snapshot that introduced the protocol alongside a real server.
+
+Downstream code and documentation must pin the canonical repository, currently at
+commit `8f6521b2be61c5cd729cffef9fdd5f46e899662b`, rather than treating this embedded
+copy as an independent protocol authority. The canonical commit adds executable
+community and Fiducia discovery-conformance profiles.
 
 ## Crates
 
 - `agent-pontifex-protocol` contains vendor-neutral JSON wire types for bridge
   channels, messages, presence, repository-path leases, and coordinator jobs.
-- `agent-pontifex-sdk` provides typed HTTP clients for the existing bridge and
-  coordinator routes. Redirects are disabled, credentials are held in sensitive
-  header values, response bodies are bounded, and dynamic identifiers are encoded
-  as URL path segments.
+- `agent-pontifex-sdk` provides typed HTTP clients for bridge and coordinator
+  routes. Redirects are disabled, credentials are held in sensitive header
+  values, response bodies are bounded, and dynamic identifiers are encoded as URL
+  path segments.
 
 Both crates deliberately exclude persistence, provider routing, GitHub or Linear
 credentials, review policy, and Fiducia coordination internals.
@@ -73,15 +78,12 @@ cargo test --manifest-path sdk/agent-pontifex-sdk/Cargo.toml
 The dedicated GitHub Actions workflow also runs formatting, Clippy with warnings
 denied, tests, and SDK documentation.
 
-## Extraction sequence
+## Final extraction cleanup
 
-1. Review the protocol against both the community bridge/coordinator and the
-   Fiducia bridge/control plane.
-2. Stabilize capability names and validate the well-known discovery endpoint across both servers.
-3. Move these crates, preserving history, to `agent-pontifex/agent-sdk.rs`.
-4. Pin consumers to immutable tags or commit SHAs.
-5. Keep cross-project inspiration intentional: generic improvements are proposed
-   upstream; Fiducia-specific authority and policy stay downstream.
+After all community and Fiducia consumers are pinned to an immutable canonical
+SDK revision, remove the embedded crates in a separate PR while retaining this
+server's history. Generic improvements should be proposed upstream; Fiducia-
+specific authority and policy stay downstream.
 
 A protocol change is compatible when an older client can ignore new optional
 fields and namespaced extensions. Renames, field removals, enum reinterpretation,
