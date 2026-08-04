@@ -6,9 +6,10 @@ This directory remains temporarily as the history-preserving bridge integration
 snapshot that introduced the protocol alongside a real server.
 
 Downstream code and documentation must pin the canonical repository, currently at
-commit `8f6521b2be61c5cd729cffef9fdd5f46e899662b`, rather than treating this embedded
+commit `6a97c7d9e1cc83ca4976bcf45e63deac6bd32a61`, rather than treating this embedded
 copy as an independent protocol authority. The canonical commit adds executable
-community and Fiducia discovery-conformance profiles.
+community and Fiducia discovery-conformance profiles and enforces Fiducia's
+fencing-preserving coordinator-adapter boundary.
 
 ## Crates
 
