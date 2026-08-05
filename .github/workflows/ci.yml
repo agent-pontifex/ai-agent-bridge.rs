@@ -118,10 +118,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for feature_args in '' '--features postgres'; do
-            cargo tree --locked --edges normal,build,dev $feature_args \
-              >"${RUNNER_TEMP}/cargo-tree-${feature_args// /-}.txt"
-          done
+          cargo tree --locked --edges normal,build,dev \
+            >"${RUNNER_TEMP}/cargo-tree-default.txt"
+          cargo tree --locked --edges normal,build,dev --features postgres \
+            >"${RUNNER_TEMP}/cargo-tree-postgres.txt"
           if grep -F 'rkyv v0.7.46' "${RUNNER_TEMP}"/cargo-tree-*.txt; then
             echo 'RUSTSEC-2026-0235 is reachable in a compiled dependency graph' >&2
             exit 1
