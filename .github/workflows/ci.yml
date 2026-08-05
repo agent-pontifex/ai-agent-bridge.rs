@@ -1,5 +1,5 @@
 # CI pipeline: secret hygiene, formatting, clippy (warnings as errors), tests,
-# canonical-schema Postgres durability, browser automation, and flags-2-env audits.
+# public-schema Postgres durability, browser automation, and flags-2-env audits.
 name: CI
 
 on:
@@ -33,34 +33,49 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      EXPECTED_SHARED_COMMIT: 3c84cab532b27d328378f09fba5841f02644ae3b
       DPM_INSTALLER_COMMIT: f7180770fc0c7a3dbf9b83dcdc2ac6255da31ffc
+      EXPECTED_FLAGS_COMMIT: 16fbd8b724e76990e9dcf6237bf44528433b09b1
       FIDUCIA_BRIDGE_TEST_DATABASE_URL: postgresql://bridge:bridge-test-only@localhost:5432/bridge_restart
       SHADOW_DATABASE_URL: postgresql://bridge:bridge-test-only@localhost:5432/postgres
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          submodules: recursive
+          show-progress: false
       - name: Validate GitHub Actions
         uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
         with:
           args: >-
             ./.github/workflows/ci.yml
             ./.github/workflows/slack-ingress-browser-security.yml
-            ./.github/workflows/seaorm-branch.yml
+            ./.github/workflows/seaorm-exact.yml
       - name: Audit provider credential hygiene
         run: python3 scripts/audit-provider-secrets.py
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: "1.95.0"
           components: rustfmt, clippy
-      - name: Validate shared schema and SeaORM policy
+      - name: Validate public persistence and SeaORM policy
         shell: bash
         run: |
           set -euo pipefail
+          python3 -m json.tool persistence/agent-pontifex-persistence/contract.json >/dev/null
           node --test scripts/seaorm-policy.test.mjs
           node scripts/check-seaorm-policy.mjs
+          if git grep -n 'vendor/k8s-libs-and-shared-defs' -- \
+            . \
+            ':!.github/workflows/ci.yml' \
+            ':!.github/workflows/seaorm-exact.yml' \
+            ':!scripts/seaorm-policy.mjs' \
+            ':!scripts/seaorm-policy.test.mjs'; then
+            echo 'private persistence ownership reference remains outside policy tests' >&2
+            exit 1
+          fi
+          if git grep -n 'submodules: recursive' -- \
+            .github/workflows ':!.github/workflows/ci.yml' ':!.github/workflows/seaorm-exact.yml'; then
+            echo 'recursive checkout remains in a permanent workflow' >&2
+            exit 1
+          fi
       - name: Install pinned declarative migration tool
         shell: bash
         run: |
@@ -69,16 +84,17 @@ jobs:
             "https://raw.githubusercontent.com/declarative-migrations/declarative-postgres-migrate.rs/${DPM_INSTALLER_COMMIT}/scripts/install.sh" \
             | bash
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: Provision disposable Postgres through DPM bootstrap
+      - name: Provision disposable Postgres through public DPM bootstrap
         shell: bash
+        env:
+          SOURCE_SQL_FILE: persistence/agent-pontifex-persistence/schema.sql
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
-          vendor/k8s-libs-and-shared-defs/pg-defs/scripts/dpm.sh bootstrap \
-            > "${RUNNER_TEMP}/canonical-schema.sql"
+          dpm bootstrap > "${RUNNER_TEMP}/agent-pontifex-schema.sql"
           psql "$FIDUCIA_BRIDGE_TEST_DATABASE_URL" \
             -v ON_ERROR_STOP=1 \
-            -f "${RUNNER_TEMP}/canonical-schema.sql"
+            -f "${RUNNER_TEMP}/agent-pontifex-schema.sql"
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets --locked --features postgres -- -D warnings
       - run: cargo test --all-targets --locked
@@ -89,13 +105,38 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ! grep -RInE \
+          if grep -RInE \
             '(^|[^A-Za-z0-9_])sqlx::(query|query_as|query_scalar|raw_sql|migrate!)|\bPgPool(Options)?\b|^sqlx[[:space:]]*=' \
-            Cargo.toml src tests
+            Cargo.toml persistence src tests; then
+            echo 'direct SQLx or boot migration path detected' >&2
+            exit 1
+          fi
       - uses: taiki-e/install-action@7572810d7dd469b651bb7793945692cf78da5dd7 # v2.85.0
         with:
           tool: cargo-audit@0.22.2
-      - run: cargo audit
+      - name: Audit reachable dependency graphs
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo tree --locked --edges normal,build,dev \
+            >"${RUNNER_TEMP}/cargo-tree-default.txt"
+          cargo tree --locked --edges normal,build,dev --features postgres \
+            >"${RUNNER_TEMP}/cargo-tree-postgres.txt"
+          if grep -F 'rkyv v0.7.46' "${RUNNER_TEMP}"/cargo-tree-*.txt; then
+            echo 'RUSTSEC-2026-0235 is reachable in a compiled dependency graph' >&2
+            exit 1
+          fi
+          # Cargo.lock retains rust_decimal's optional rkyv 0.7 metadata even
+          # though neither the default nor postgres graph enables it. Keep the
+          # advisory narrowly acknowledged only after the reachability proof.
+          cargo audit --ignore RUSTSEC-2026-0235
+      - name: Initialize the public flags2env source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git submodule sync -- vendor/flags-2-env
+          git submodule update --init --depth=1 -- vendor/flags-2-env
+          test "$(git -C vendor/flags-2-env rev-parse HEAD)" = "$EXPECTED_FLAGS_COMMIT"
       - run: make -B -C vendor/flags-2-env all
       - run: vendor/flags-2-env/build/flags2env audit .cli-flags.toml
 
@@ -106,7 +147,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          submodules: recursive
+          show-progress: false
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: "1.95.0"

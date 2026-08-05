@@ -34,10 +34,10 @@ fn state_with_db(db: Db) -> std::sync::Arc<AppState> {
 }
 
 #[tokio::test]
-#[ignore = "requires FIDUCIA_BRIDGE_TEST_DATABASE_URL provisioned from canonical pg-defs schema.sql"]
+#[ignore = "requires FIDUCIA_BRIDGE_TEST_DATABASE_URL provisioned from public Agent Pontifex persistence schema.sql"]
 async fn restart_restores_history_context_and_agent_metadata_without_stale_presence() {
     let database_url = std::env::var("FIDUCIA_BRIDGE_TEST_DATABASE_URL")
-        .expect("FIDUCIA_BRIDGE_TEST_DATABASE_URL must name a dedicated canonical-schema database");
+        .expect("FIDUCIA_BRIDGE_TEST_DATABASE_URL must name a dedicated public-schema database");
     let setup = Database::connect(&database_url)
         .await
         .expect("connect test database through SeaORM");

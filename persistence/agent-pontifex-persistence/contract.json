@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": 1,
+  "policyIssue": "agent-pontifex/ai-agent-bridge.rs#2",
+  "schemaAuthority": {
+    "repository": "agent-pontifex/ai-agent-bridge.rs",
+    "path": "persistence/agent-pontifex-persistence/schema.sql",
+    "sha256": "124e23618cef02cf4c497a1090bf0d4ba73f09c787de7ccd6ec9a965c84fdce1",
+    "generatedAdaptersAreMigrationSources": false,
+    "serviceBootMigrations": false,
+    "humanReviewRequired": true
+  },
+  "upstreamProvenance": {
+    "repository": "ORESoftware/k8s-libs-and-shared-defs",
+    "path": "pg-defs/schema/schema.sql",
+    "commit": "3c84cab532b27d328378f09fba5841f02644ae3b",
+    "extractedSchema": "ai_agent_bridge",
+    "tables": [
+      "agents",
+      "channels",
+      "channel_members",
+      "messages",
+      "shared_context"
+    ],
+    "privateCheckoutRequired": false
+  },
+  "migration": {
+    "tool": "dpm",
+    "repository": "declarative-migrations/declarative-postgres-migrate.rs",
+    "minimumVersion": "0.3.2",
+    "installerCommit": "f7180770fc0c7a3dbf9b83dcdc2ac6255da31ffc",
+    "defaultCommand": "diff",
+    "allowedCommands": [
+      "diff",
+      "verify",
+      "review",
+      "apply",
+      "bootstrap"
+    ],
+    "applyRequiresHumanReview": true,
+    "destructiveConsents": [
+      "--allow-destructive-sql",
+      "--allow-destructive-ops"
+    ]
+  },
+  "rust": {
+    "applicationOrm": "SeaORM",
+    "directSqlxDependency": "forbidden",
+    "rawTokioPostgresDependency": "forbidden",
+    "connectionApi": "sea_orm::Database::connect",
+    "statementApi": "sea_orm::Statement",
+    "publicCrate": {
+      "package": "agent-pontifex-persistence",
+      "manifest": "persistence/agent-pontifex-persistence/Cargo.toml",
+      "source": "persistence/agent-pontifex-persistence/src/lib.rs"
+    },
+    "sanctionedStatementCases": [
+      "data-modifying-ctes",
+      "excluded-expression-upserts",
+      "postgres-casts-and-operators",
+      "server-clock-writes",
+      "windowed-history-restore"
+    ],
+    "listenerEscape": "sea_orm::sqlx::postgres::PgListener"
+  },
+  "consumer": {
+    "distribution": "same-repository-path",
+    "repository": "agent-pontifex/ai-agent-bridge.rs",
+    "cargoPath": "persistence/agent-pontifex-persistence",
+    "schemaPath": "persistence/agent-pontifex-persistence/schema.sql",
+    "sameCommitAuthority": true
+  },
+  "verification": [
+    "cargo-check-all-targets",
+    "cargo-test-all-targets",
+    "cargo-clippy-warnings-denied",
+    "direct-sqlx-grep-clean",
+    "no-boot-time-migration-path",
+    "dpm-bootstrap-restart-test"
+  ]
+}

@@ -5,8 +5,16 @@ const REQUIRED_STATEMENT_FRAGMENTS = [
   "on conflict (slug) do update",
   "on conflict (channel_slug, seq) do nothing",
   "on conflict (channel_slug, agent_key) do update",
-  "where ai_agent_bridge.shared_context.version < excluded.version",
+  "version < excluded.version",
   "updated_at = now()",
+];
+
+const TABLES = [
+  "agents",
+  "channels",
+  "channel_members",
+  "messages",
+  "shared_context",
 ];
 
 export class SeaOrmPolicyError extends Error {
@@ -22,7 +30,8 @@ function require(condition, message, errors) {
 }
 
 function dependency(manifest, name) {
-  const pattern = new RegExp(`^\\s*${name.replaceAll("-", "\\-")}\\s*=`, "mu");
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const pattern = new RegExp(`^\\s*${escaped}\\s*=`, "mu");
   return pattern.test(manifest);
 }
 
@@ -31,19 +40,21 @@ export function validateSeaOrmPolicy({
   databaseSource,
   restartTest,
   gitmodules,
-  sharedContract,
-  sharedCommit,
+  persistenceManifest,
+  persistenceSource,
+  persistenceContract,
+  persistenceSchema,
+  persistenceSchemaSha256,
 }) {
   const errors = [];
-  require(/^[0-9a-f]{40}$/u.test(sharedCommit ?? ""), "shared checkout must be an immutable commit", errors);
 
   if (typeof manifest !== "string") {
     errors.push("Cargo.toml must be text");
   } else {
     require(dependency(manifest, "sea-orm"), "Cargo.toml must depend on SeaORM", errors);
     require(
-      dependency(manifest, "dd-pg-defs-sea-orm"),
-      "Cargo.toml must consume dd-pg-defs-sea-orm",
+      dependency(manifest, "agent-pontifex-persistence"),
+      "Cargo.toml must consume the public Agent Pontifex persistence crate",
       errors,
     );
     require(!dependency(manifest, "sqlx"), "Cargo.toml must not directly depend on SQLx", errors);
@@ -53,15 +64,22 @@ export function validateSeaOrmPolicy({
       errors,
     );
     require(
-      manifest.includes('postgres = ["dep:sea-orm", "dep:dd-pg-defs-sea-orm"]'),
-      "the postgres feature must enable only SeaORM persistence dependencies",
+      manifest.includes(
+        'postgres = ["dep:sea-orm", "dep:agent-pontifex-persistence"]',
+      ),
+      "the postgres feature must enable only public SeaORM persistence dependencies",
       errors,
     );
     require(
       manifest.includes(
-        'path = "vendor/k8s-libs-and-shared-defs/pg-defs/generated/rust/sea-orm"',
+        'path = "persistence/agent-pontifex-persistence"',
       ),
-      "generated adapter path must remain in the pinned shared submodule",
+      "the public persistence crate must be consumed from its repository-owned path",
+      errors,
+    );
+    require(
+      !manifest.includes("vendor/k8s-libs-and-shared-defs"),
+      "Cargo.toml must not depend on the private fleet schema checkout",
       errors,
     );
   }
@@ -85,9 +103,10 @@ export function validateSeaOrmPolicy({
       "FromQueryResult",
       "Statement::from_sql_and_values",
       "Value::Array",
-      "dd_pg_defs_sea_orm",
-      "verify_generated_entity_contract",
+      "agent_pontifex_persistence",
+      "verify_public_entity_contract",
       "on conflict (channel_slug, ctx_key) do update",
+      'const SHARED_CONTEXT_TABLE: &str = "ai_agent_bridge.shared_context"',
     ]) {
       require(databaseSource.includes(required), `src/db.rs is missing ${JSON.stringify(required)}`, errors);
     }
@@ -117,12 +136,12 @@ export function validateSeaOrmPolicy({
     require(!/sqlx::|PgPool|raw_sql/u.test(restartTest), "restart test must not use direct SQLx", errors);
     require(
       !/create\s+(?:schema|table)\b/iu.test(restartTest),
-      "restart test must not duplicate the canonical schema",
+      "restart test must not duplicate the public schema",
       errors,
     );
     require(
-      restartTest.includes("provisioned from canonical pg-defs schema.sql"),
-      "restart test must require canonical schema provisioning",
+      restartTest.includes("public Agent Pontifex persistence schema.sql"),
+      "restart test must require public schema provisioning",
       errors,
     );
     require(
@@ -138,38 +157,137 @@ export function validateSeaOrmPolicy({
     errors.push(".gitmodules must be text");
   } else {
     require(
-      gitmodules.includes('[submodule "vendor/k8s-libs-and-shared-defs"]') &&
-        gitmodules.includes("https://github.com/ORESoftware/k8s-libs-and-shared-defs.git"),
-      "the canonical shared definitions submodule is missing",
+      gitmodules.includes('[submodule "vendor/flags-2-env"]') &&
+        gitmodules.includes("https://github.com/ORESoftware/flags-2-env.git"),
+      "the public flags2env submodule is missing",
+      errors,
+    );
+    require(
+      !gitmodules.includes("k8s-libs-and-shared-defs"),
+      "the private fleet schema must not remain a Git submodule",
       errors,
     );
   }
 
-  if (sharedContract === null || typeof sharedContract !== "object" || Array.isArray(sharedContract)) {
-    errors.push("shared Rust server contract must be an object");
+  if (typeof persistenceManifest !== "string") {
+    errors.push("public persistence Cargo.toml must be text");
   } else {
     require(
-      sharedContract.schemaAuthority?.repository === "ORESoftware/k8s-libs-and-shared-defs" &&
-        sharedContract.schemaAuthority?.path === "pg-defs/schema/schema.sql",
-      "shared schema authority drifted",
-      errors,
-    );
-    require(sharedContract.rust?.applicationOrm === "SeaORM", "shared contract must require SeaORM", errors);
-    require(
-      sharedContract.rust?.directSqlxDependency === "forbidden",
-      "shared contract must forbid direct SQLx",
+      /^name\s*=\s*"agent-pontifex-persistence"$/mu.test(persistenceManifest),
+      "public persistence package name drifted",
       errors,
     );
     require(
-      sharedContract.schemaAuthority?.serviceBootMigrations === false,
-      "shared contract must forbid boot migrations",
+      dependency(persistenceManifest, "sea-orm"),
+      "public persistence crate must expose SeaORM table identities",
       errors,
     );
-    require(sharedContract.migration?.tool === "dpm", "shared migration tool must remain dpm", errors);
+  }
+
+  if (typeof persistenceSource !== "string") {
+    errors.push("public persistence src/lib.rs must be text");
+  } else {
+    for (const entity of [
+      "AgentsEntity",
+      "ChannelsEntity",
+      "ChannelMembersEntity",
+      "MessagesEntity",
+      "SharedContextEntity",
+    ]) {
+      require(
+        persistenceSource.includes(entity),
+        `public persistence crate is missing ${entity}`,
+        errors,
+      );
+    }
     require(
-      sharedContract.migration?.repository ===
-        "declarative-migrations/declarative-postgres-migrate.rs",
-      "shared DPM repository drifted",
+      persistenceSource.includes('Some("ai_agent_bridge")'),
+      "public entities must remain scoped to ai_agent_bridge",
+      errors,
+    );
+  }
+
+  if (
+    persistenceContract === null ||
+    typeof persistenceContract !== "object" ||
+    Array.isArray(persistenceContract)
+  ) {
+    errors.push("public persistence contract must be an object");
+  } else {
+    require(
+      persistenceContract.schemaAuthority?.repository ===
+        "agent-pontifex/ai-agent-bridge.rs" &&
+        persistenceContract.schemaAuthority?.path ===
+          "persistence/agent-pontifex-persistence/schema.sql",
+      "public schema authority drifted",
+      errors,
+    );
+    require(
+      persistenceContract.schemaAuthority?.sha256 === persistenceSchemaSha256,
+      "public schema digest does not match contract.json",
+      errors,
+    );
+    require(
+      persistenceContract.upstreamProvenance?.repository ===
+        "ORESoftware/k8s-libs-and-shared-defs" &&
+        persistenceContract.upstreamProvenance?.path ===
+          "pg-defs/schema/schema.sql" &&
+        persistenceContract.upstreamProvenance?.commit ===
+          "3c84cab532b27d328378f09fba5841f02644ae3b",
+      "immutable upstream provenance drifted",
+      errors,
+    );
+    require(
+      persistenceContract.upstreamProvenance?.privateCheckoutRequired === false,
+      "public consumers must not require the private upstream checkout",
+      errors,
+    );
+    require(
+      persistenceContract.rust?.applicationOrm === "SeaORM",
+      "public contract must require SeaORM",
+      errors,
+    );
+    require(
+      persistenceContract.rust?.directSqlxDependency === "forbidden",
+      "public contract must forbid direct SQLx",
+      errors,
+    );
+    require(
+      persistenceContract.schemaAuthority?.serviceBootMigrations === false,
+      "public contract must forbid boot migrations",
+      errors,
+    );
+    require(
+      persistenceContract.migration?.tool === "dpm" &&
+        persistenceContract.migration?.repository ===
+          "declarative-migrations/declarative-postgres-migrate.rs",
+      "public migration authority drifted",
+      errors,
+    );
+  }
+
+  if (typeof persistenceSchema !== "string") {
+    errors.push("public persistence schema.sql must be text");
+  } else {
+    require(
+      persistenceSchema.includes("create schema if not exists ai_agent_bridge"),
+      "public schema must own ai_agent_bridge",
+      errors,
+    );
+    for (const table of TABLES) {
+      require(
+        persistenceSchema.includes(
+          `create table if not exists ai_agent_bridge.${table}`,
+        ),
+        `public schema is missing table ${table}`,
+        errors,
+      );
+    }
+    require(
+      !/create\s+schema\s+if\s+not\s+exists\s+(?!ai_agent_bridge\b)/iu.test(
+        persistenceSchema,
+      ),
+      "public bridge schema must not absorb unrelated fleet schemas",
       errors,
     );
   }
@@ -177,11 +295,15 @@ export function validateSeaOrmPolicy({
   if (errors.length > 0) throw new SeaOrmPolicyError(errors);
   return {
     valid: true,
-    service: "fiducia-ai-agent-bridge",
+    service: "agent-pontifex-ai-agent-bridge",
     applicationOrm: "SeaORM",
-    sharedCommit,
+    schemaAuthority: "agent-pontifex/ai-agent-bridge.rs",
+    upstreamCommit:
+      persistenceContract.upstreamProvenance.commit,
     statementSemantics: REQUIRED_STATEMENT_FRAGMENTS.length,
+    publicTables: TABLES.length,
     directSqlx: false,
     bootMigrations: false,
+    privateCheckoutRequired: false,
   };
 }
