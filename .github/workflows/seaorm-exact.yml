@@ -70,10 +70,12 @@ jobs:
       - name: Validate public authority and mutation policy
         run: |
           set -euo pipefail
+          python3 -m json.tool persistence/agent-pontifex-persistence/contract.json >/dev/null
           node --test scripts/seaorm-policy.test.mjs
           node scripts/check-seaorm-policy.mjs
           ! grep -RIn 'vendor/k8s-libs-and-shared-defs' \
             .gitmodules Cargo.toml .github Dockerfile src tests
+          ! grep -RIn 'submodules: recursive' .github/workflows
       - name: Install the pinned declarative migration tool
         run: |
           set -euo pipefail
@@ -82,12 +84,12 @@ jobs:
             | bash
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Provision PostgreSQL from the public DPM source
+        env:
+          SOURCE_SQL_FILE: persistence/agent-pontifex-persistence/schema.sql
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
-          dpm bootstrap \
-            --source persistence/agent-pontifex-persistence/schema.sql \
-            > "${RUNNER_TEMP}/agent-pontifex-schema.sql"
+          dpm bootstrap > "${RUNNER_TEMP}/agent-pontifex-schema.sql"
           psql "$FIDUCIA_BRIDGE_TEST_DATABASE_URL" \
             -v ON_ERROR_STOP=1 \
             -f "${RUNNER_TEMP}/agent-pontifex-schema.sql"
