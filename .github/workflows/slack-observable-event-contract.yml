@@ -45,9 +45,9 @@ jobs:
           persist-credentials: false
 
       - name: Install pinned Rust toolchain
-        uses: dtolnay/rust-toolchain@46511b1c83438f0dd37c02d843619ece5a4abb5b
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.97.1
+          toolchain: "1.95.0"
           components: rustfmt
 
       - name: Validate formatting and focused contracts
