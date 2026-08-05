@@ -5,7 +5,7 @@ const REQUIRED_STATEMENT_FRAGMENTS = [
   "on conflict (slug) do update",
   "on conflict (channel_slug, seq) do nothing",
   "on conflict (channel_slug, agent_key) do update",
-  "where ai_agent_bridge.shared_context.version < excluded.version",
+  "version < excluded.version",
   "updated_at = now()",
 ];
 
@@ -106,6 +106,7 @@ export function validateSeaOrmPolicy({
       "agent_pontifex_persistence",
       "verify_public_entity_contract",
       "on conflict (channel_slug, ctx_key) do update",
+      'const SHARED_CONTEXT_TABLE: &str = "ai_agent_bridge.shared_context"',
     ]) {
       require(databaseSource.includes(required), `src/db.rs is missing ${JSON.stringify(required)}`, errors);
     }
