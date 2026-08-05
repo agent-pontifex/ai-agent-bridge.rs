@@ -1,0 +1,166 @@
+name: reconcile public persistence consumer v3
+
+on:
+  push:
+    branches:
+      - agent/shared-protocol-sdk-foundation
+    paths:
+      - ".github/workflows/public-persistence-reconcile-v3.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-persistence-reconcile-v3
+  cancel-in-progress: true
+
+jobs:
+  reconcile:
+    if: >-
+      github.repository == 'agent-pontifex/ai-agent-bridge.rs' &&
+      github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+        env:
+          POSTGRES_DB: bridge_restart
+          POSTGRES_USER: bridge
+          POSTGRES_PASSWORD: bridge-test-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bridge -d bridge_restart"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DPM_INSTALLER_COMMIT: f7180770fc0c7a3dbf9b83dcdc2ac6255da31ffc
+      FIDUCIA_BRIDGE_TEST_DATABASE_URL: postgresql://bridge:bridge-test-only@localhost:5432/bridge_restart
+      SHADOW_DATABASE_URL: postgresql://bridge:bridge-test-only@localhost:5432/postgres
+      EXPECTED_FLAGS_COMMIT: 16fbd8b724e76990e9dcf6237bf44528433b09b1
+    steps:
+      - name: Check out the reviewed branch without private submodules
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: agent/shared-protocol-sdk-foundation
+          fetch-depth: 0
+          persist-credentials: false
+          show-progress: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: "1.95.0"
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Replay the reviewed structural reconciliation
+        run: |
+          set -euo pipefail
+          git rm -f --ignore-unmatch vendor/k8s-libs-and-shared-defs
+          cat > .gitmodules <<'GITMODULES'
+          [submodule "vendor/flags-2-env"]
+              path = vendor/flags-2-env
+              url = https://github.com/ORESoftware/flags-2-env.git
+          GITMODULES
+
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          from textwrap import dedent
+
+          workflow = Path(
+              ".github/workflows/public-persistence-reconcile-v2.yml"
+          ).read_text(encoding="utf-8")
+          start_marker = "          python3 - <<'PY'\n"
+          end_marker = "\n          PY\n"
+          if workflow.count(start_marker) != 1:
+              raise SystemExit("reviewed v2 transformation start marker drifted")
+          body = workflow.split(start_marker, 1)[1]
+          if body.count(end_marker) != 1:
+              raise SystemExit("reviewed v2 transformation end marker drifted")
+          script = dedent(body.split(end_marker, 1)[0])
+          exec(compile(script, "public-persistence-reconcile-v2", "exec"), {})
+
+          release_stable = (
+              "SOURCE_SQL_FILE=persistence/agent-pontifex-persistence/schema.sql "
+              "dpm bootstrap"
+          )
+          for path in Path(".github/workflows").glob("*.yml"):
+              text = path.read_text(encoding="utf-8")
+              text = text.replace(
+                  "dpm bootstrap --source "
+                  "persistence/agent-pontifex-persistence/schema.sql",
+                  release_stable,
+              )
+              text = text.replace(
+                  "dpm bootstrap \\\n"
+                  "            --source persistence/agent-pontifex-persistence/schema.sql \\\n",
+                  release_stable + " \\\n",
+              )
+              path.write_text(text, encoding="utf-8")
+          PYTHON
+      - name: Validate policy and repository ownership
+        run: |
+          set -euo pipefail
+          python3 -m json.tool persistence/agent-pontifex-persistence/contract.json >/dev/null
+          node --test scripts/seaorm-policy.test.mjs
+          node scripts/check-seaorm-policy.mjs
+          test -z "$(git ls-files --stage vendor/k8s-libs-and-shared-defs)"
+          ! grep -RIn 'vendor/k8s-libs-and-shared-defs' \
+            .gitmodules Cargo.toml .github Dockerfile src tests
+          ! grep -RIn 'submodules: recursive' .github/workflows
+          ! grep -RIn 'dpm bootstrap --source' .github/workflows
+          git diff --check
+      - name: Install the pinned declarative migration tool
+        run: |
+          set -euo pipefail
+          curl --proto '=https' --tlsv1.2 -fsSL \
+            "https://raw.githubusercontent.com/declarative-migrations/declarative-postgres-migrate.rs/${DPM_INSTALLER_COMMIT}/scripts/install.sh" \
+            | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Provision PostgreSQL through the release-stable DPM env contract
+        env:
+          SOURCE_SQL_FILE: persistence/agent-pontifex-persistence/schema.sql
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+          dpm bootstrap > "${RUNNER_TEMP}/agent-pontifex-schema.sql"
+          psql "$FIDUCIA_BRIDGE_TEST_DATABASE_URL" \
+            -v ON_ERROR_STOP=1 \
+            -f "${RUNNER_TEMP}/agent-pontifex-schema.sql"
+      - name: Regenerate the renamed path package and validate Rust
+        run: |
+          set -euo pipefail
+          cargo check --all-targets --features postgres
+          cargo fmt --all
+          cargo fmt --all -- --check
+          cargo clippy --all-targets --locked --features postgres -- -D warnings
+          cargo test --all-targets --locked
+          cargo check --all-targets --locked --features postgres
+          cargo test --locked --features postgres --test postgres_restart -- --ignored
+      - name: Validate the remaining public submodule
+        run: |
+          set -euo pipefail
+          git submodule sync -- vendor/flags-2-env
+          git submodule update --init --depth=1 -- vendor/flags-2-env
+          test "$(git -C vendor/flags-2-env rev-parse HEAD)" = "$EXPECTED_FLAGS_COMMIT"
+          make -B -C vendor/flags-2-env all
+          vendor/flags-2-env/build/flags2env audit .cli-flags.toml
+      - name: Commit only the durable public result
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/public-persistence-reconcile.yml
+          rm -f .github/workflows/public-persistence-reconcile-v2.yml
+          rm -f .github/workflows/public-persistence-reconcile-v3.yml
+          git add -A
+          git diff --cached --check
+          test -z "$(git ls-files --stage vendor/k8s-libs-and-shared-defs)"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'refactor: make bridge persistence public'
+          git push \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            HEAD:agent/shared-protocol-sdk-foundation
