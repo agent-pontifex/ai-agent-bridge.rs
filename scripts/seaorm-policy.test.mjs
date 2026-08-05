@@ -29,6 +29,7 @@ postgres = ["dep:sea-orm", "dep:agent-pontifex-persistence"]
 `,
   databaseSource: `
 use sea_orm::{ConnectOptions, DatabaseConnection, FromQueryResult, Statement, Value};
+const SHARED_CONTEXT_TABLE: &str = "ai_agent_bridge.shared_context";
 fn verify_public_entity_contract() { let _ = agent_pontifex_persistence::AgentsEntity; }
 fn statements(channel_slugs: &[String]) {
   options.sqlx_logging(false);
