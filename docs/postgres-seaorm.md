@@ -1,21 +1,26 @@
-# Postgres persistence: SeaORM over the shared declarative schema
+# PostgreSQL persistence: SeaORM over the public Agent Pontifex contract
 
 The bridge is in-memory first. Building with `--features postgres` adds a
 best-effort durable mirror and restart restoration through **SeaORM**.
 
 ## Schema and migration ownership
 
-The application does not own DDL or run migrations at startup.
+The bridge repository owns its narrow public DDL contract, but the application
+never runs migrations at startup.
 
 | Concern | Authority |
 | --- | --- |
-| Canonical shared DDL | `vendor/k8s-libs-and-shared-defs/pg-defs/schema/schema.sql` |
-| Generated entities | `vendor/k8s-libs-and-shared-defs/pg-defs/generated/rust/sea-orm` |
-| Migration diff / verify / reviewed apply | `declarative-migrations/declarative-postgres-migrate.rs` through the pinned shared `dpm.sh` wrapper |
+| Public desired-state DDL | `persistence/agent-pontifex-persistence/schema.sql` |
+| Public table identities | `persistence/agent-pontifex-persistence/src/lib.rs` |
+| Ownership and immutable provenance | `persistence/agent-pontifex-persistence/contract.json` |
+| Migration diff / verify / reviewed apply | `declarative-migrations/declarative-postgres-migrate.rs` |
 | Runtime connection, restore, and writes | `src/db.rs` through SeaORM |
 
-The shared repository is pinned as an immutable Git submodule. Generated
-entities are adapters to the DDL contract; they are not migration sources.
+The five-table contract was extracted from
+`ORESoftware/k8s-libs-and-shared-defs/pg-defs/schema/schema.sql` at immutable
+commit `3c84cab532b27d328378f09fba5841f02644ae3b`. That repository remains
+documented provenance, not a build, CI, or deployment dependency. The public
+crate and schema travel with the same bridge commit that consumes them.
 
 ## Why several queries remain explicit Statements
 
@@ -49,14 +54,13 @@ overwrite a newer version.
 
 ## DPM workflow
 
-Review schema changes in the shared repository:
+Render and review schema changes from the public desired-state file:
 
 ```sh
-cd vendor/k8s-libs-and-shared-defs/pg-defs
-scripts/dpm.sh diff
-scripts/dpm.sh verify
-scripts/dpm.sh review
-# scripts/dpm.sh apply  # explicit human action only
+dpm diff --source persistence/agent-pontifex-persistence/schema.sql
+dpm verify --source persistence/agent-pontifex-persistence/schema.sql
+dpm review --source persistence/agent-pontifex-persistence/schema.sql
+# dpm apply --source persistence/agent-pontifex-persistence/schema.sql
 ```
 
 Destructive changes require both reviewed DPM consent flags. Neither DPM nor an
@@ -64,29 +68,31 @@ ORM migration command belongs in bridge startup or deployment arguments.
 
 ## Local and CI verification
 
-Initialize submodules, then run:
+Initialize only the public tool submodule, then run:
 
 ```sh
-git submodule update --init --recursive
+git submodule update --init --depth=1 -- vendor/flags-2-env
 node --test scripts/seaorm-policy.test.mjs
-EXPECTED_SHARED_COMMIT=3c84cab532b27d328378f09fba5841f02644ae3b \
-  node scripts/check-seaorm-policy.mjs
+node scripts/check-seaorm-policy.mjs
 cargo clippy --all-targets --locked --features postgres -- -D warnings
 cargo test --all-targets --locked
 cargo check --all-targets --locked --features postgres
 ```
 
 The ignored restart test requires a disposable database provisioned from DPM
-bootstrap output for the canonical schema:
+bootstrap output for the public schema:
 
 ```sh
 export FIDUCIA_BRIDGE_TEST_DATABASE_URL=postgresql://...
+dpm bootstrap --source persistence/agent-pontifex-persistence/schema.sql \
+  | psql "$FIDUCIA_BRIDGE_TEST_DATABASE_URL" -v ON_ERROR_STOP=1
 cargo test --locked --features postgres --test postgres_restart -- --ignored
 ```
 
-A successful migration PR must also be grep-clean for direct SQLx pool/query or
-boot-migration calls. The SeaORM feature string `sqlx-postgres` is the expected
-transport backend and is not a direct SQLx application dependency.
+A successful persistence PR must also be grep-clean for direct SQLx pool/query,
+private schema checkout, recursive submodule checkout, or boot-migration calls.
+The SeaORM feature string `sqlx-postgres` is the expected transport backend and
+is not a direct SQLx application dependency.
 
 ## UI boundary
 
