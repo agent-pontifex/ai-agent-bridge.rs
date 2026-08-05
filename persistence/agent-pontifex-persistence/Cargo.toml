@@ -1,0 +1,12 @@
+[package]
+name = "agent-pontifex-persistence"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+description = "Public PostgreSQL schema and SeaORM table contract for Agent Pontifex."
+repository = "https://github.com/agent-pontifex/ai-agent-bridge.rs"
+
+[dependencies]
+sea-orm = { version = "1", features = ["macros", "with-uuid", "with-json", "with-chrono"] }
+serde = { version = "1", features = ["derive"] }
