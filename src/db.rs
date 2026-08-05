@@ -19,8 +19,8 @@ use std::time::Duration;
 
 use sea_orm::sea_query::ArrayType;
 use sea_orm::{
-    ConnectOptions, ConnectionTrait, Database, DatabaseConnection, DbBackend,
-    EntityName, FromQueryResult, Statement, Value,
+    ConnectOptions, ConnectionTrait, Database, DatabaseConnection, DbBackend, EntityName,
+    FromQueryResult, Statement, Value,
 };
 
 use crate::state::AppState;
@@ -218,12 +218,10 @@ impl Db {
              from {MESSAGES_TABLE} m \
              where m.channel_slug = any($1::text[]) group by m.channel_slug"
         );
-        let stats = MessageStatsRow::find_by_statement(statement(
-            stats_sql,
-            [text_array(channel_slugs)],
-        ))
-        .all(&self.database)
-        .await?;
+        let stats =
+            MessageStatsRow::find_by_statement(statement(stats_sql, [text_array(channel_slugs)]))
+                .all(&self.database)
+                .await?;
         let mut groups: BTreeMap<String, (Vec<Message>, u64, u64)> = BTreeMap::new();
         for row in stats {
             anyhow::ensure!(
@@ -504,8 +502,7 @@ fn text_array(values: &[String]) -> Value {
 
 fn verify_public_entity_contract() {
     use agent_pontifex_persistence::{
-        AgentsEntity, ChannelMembersEntity, ChannelsEntity, MessagesEntity,
-        SharedContextEntity,
+        AgentsEntity, ChannelMembersEntity, ChannelsEntity, MessagesEntity, SharedContextEntity,
     };
 
     for (schema, table) in [
@@ -533,8 +530,7 @@ mod tests {
     #[test]
     fn public_entity_contract_names_the_expected_schema_and_tables() {
         use agent_pontifex_persistence::{
-            AgentsEntity, ChannelMembersEntity, ChannelsEntity, MessagesEntity,
-            SharedContextEntity,
+            AgentsEntity, ChannelMembersEntity, ChannelsEntity, MessagesEntity, SharedContextEntity,
         };
 
         assert_eq!(AgentsEntity.schema_name(), Some("ai_agent_bridge"));
