@@ -46,7 +46,11 @@ macro_rules! entity_name {
     };
 }
 
-entity_name!(AgentsEntity, "agents", "Agent identity and durable metadata table.");
+entity_name!(
+    AgentsEntity,
+    "agents",
+    "Agent identity and durable metadata table."
+);
 entity_name!(
     ChannelsEntity,
     "channels",
@@ -57,7 +61,11 @@ entity_name!(
     "channel_members",
     "Best-effort channel membership mirror table."
 );
-entity_name!(MessagesEntity, "messages", "Ordered durable message history table.");
+entity_name!(
+    MessagesEntity,
+    "messages",
+    "Ordered durable message history table."
+);
 entity_name!(
     SharedContextEntity,
     "shared_context",
