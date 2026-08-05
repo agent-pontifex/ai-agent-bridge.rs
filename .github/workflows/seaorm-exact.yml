@@ -73,9 +73,16 @@ jobs:
           python3 -m json.tool persistence/agent-pontifex-persistence/contract.json >/dev/null
           node --test scripts/seaorm-policy.test.mjs
           node scripts/check-seaorm-policy.mjs
-          ! grep -RIn 'vendor/k8s-libs-and-shared-defs' \
-            .gitmodules Cargo.toml .github Dockerfile src tests
-          ! grep -RIn 'submodules: recursive' .github/workflows
+          if git grep -n 'vendor/k8s-libs-and-shared-defs' -- \
+            . ':!.github/workflows/ci.yml' ':!.github/workflows/seaorm-exact.yml'; then
+            echo 'private persistence ownership reference remains' >&2
+            exit 1
+          fi
+          if git grep -n 'submodules: recursive' -- \
+            .github/workflows ':!.github/workflows/ci.yml' ':!.github/workflows/seaorm-exact.yml'; then
+            echo 'recursive checkout remains in a permanent workflow' >&2
+            exit 1
+          fi
       - name: Install the pinned declarative migration tool
         run: |
           set -euo pipefail
@@ -101,6 +108,9 @@ jobs:
           cargo test --all-targets --locked
           cargo check --all-targets --locked --features postgres
           cargo test --locked --features postgres --test postgres_restart -- --ignored
-          ! grep -RInE \
+          if grep -RInE \
             '(^|[^A-Za-z0-9_])sqlx::(query|query_as|query_scalar|raw_sql|migrate!)|\bPgPool(Options)?\b|^sqlx[[:space:]]*=' \
-            Cargo.toml persistence src tests
+            Cargo.toml persistence src tests; then
+            echo 'direct SQLx or boot migration path detected' >&2
+            exit 1
+          fi
