@@ -145,10 +145,18 @@ jobs:
           ci = Path(".github/workflows/ci.yml")
           text = ci.read_text(encoding="utf-8")
           text = text.replace(
+              "# canonical-schema Postgres durability, browser automation, and flags-2-env audits.",
+              "# public-schema Postgres durability, browser automation, and flags-2-env audits.",
+          )
+          text = text.replace(
               "      EXPECTED_SHARED_COMMIT: 3c84cab532b27d328378f09fba5841f02644ae3b\n",
               "",
           )
           text = text.replace("          submodules: recursive\n", "")
+          text = text.replace(
+              "            ./.github/workflows/seaorm-branch.yml\n",
+              "            ./.github/workflows/seaorm-exact.yml\n",
+          )
           text = text.replace(
               "      - name: Validate shared schema and SeaORM policy",
               "      - name: Validate public persistence and SeaORM policy",
@@ -157,10 +165,10 @@ jobs:
               "          vendor/k8s-libs-and-shared-defs/pg-defs/scripts/dpm.sh bootstrap \\\n",
               "          dpm bootstrap --source persistence/agent-pontifex-persistence/schema.sql \\\n",
           )
-          audit_anchor = (
-              "      - run: make -B CFLAGS=\"-O2 -Wall -Wextra -Werror -pedantic -std=c11\" "
-              "flags2env-audit\n"
-          )
+          text = text.replace("canonical-schema.sql", "agent-pontifex-schema.sql")
+          audit_anchor = """      - run: make -B -C vendor/flags-2-env all
+          - run: vendor/flags-2-env/build/flags2env audit .cli-flags.toml
+          """
           public_init = """      - name: Initialize the public flags2env source
                 run: |
                   set -euo pipefail
@@ -170,12 +178,19 @@ jobs:
                     "$EXPECTED_FLAGS_COMMIT"
           """
           if text.count(audit_anchor) != 1:
-              raise SystemExit("ci.yml flags2env audit anchor drifted")
+              raise SystemExit("ci.yml flags2env audit block drifted")
           text = text.replace(audit_anchor, public_init + audit_anchor, 1)
+          dpm_env = (
+              "      DPM_INSTALLER_COMMIT: "
+              "f7180770fc0c7a3dbf9b83dcdc2ac6255da31ffc\n"
+          )
+          if text.count(dpm_env) != 1:
+              raise SystemExit("ci.yml DPM environment anchor drifted")
           text = text.replace(
-              "      DPM_INSTALLER_COMMIT: f7180770fc0c7a3dbf9b83dcdc2ac6255da31ffc\n",
-              "      DPM_INSTALLER_COMMIT: f7180770fc0c7a3dbf9b83dcdc2ac6255da31ffc\n"
-              "      EXPECTED_FLAGS_COMMIT: 16fbd8b724e76990e9dcf6237bf44528433b09b1\n",
+              dpm_env,
+              dpm_env
+              + "      EXPECTED_FLAGS_COMMIT: "
+              + "16fbd8b724e76990e9dcf6237bf44528433b09b1\n",
               1,
           )
           ci.write_text(text, encoding="utf-8")
@@ -245,8 +260,8 @@ jobs:
           git submodule update --init --depth=1 -- vendor/flags-2-env
           test "$(git -C vendor/flags-2-env rev-parse HEAD)" = \
             "$EXPECTED_FLAGS_COMMIT"
-          make -B CFLAGS="-O2 -Wall -Wextra -Werror -pedantic -std=c11" \
-            flags2env-audit
+          make -B -C vendor/flags-2-env all
+          vendor/flags-2-env/build/flags2env audit .cli-flags.toml
       - name: Commit only the durable public result
         env:
           GH_TOKEN: ${{ github.token }}
