@@ -1,0 +1,50 @@
+name: regenerate public persistence lock
+
+on:
+  push:
+    branches:
+      - agent/shared-protocol-sdk-foundation
+    paths:
+      - ".github/workflows/regenerate-public-lock.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: regenerate-public-persistence-lock
+  cancel-in-progress: true
+
+jobs:
+  regenerate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: agent/shared-protocol-sdk-foundation
+          fetch-depth: 0
+          persist-credentials: false
+          show-progress: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: "1.95.0"
+      - name: Regenerate and verify only the Cargo lock
+        run: |
+          set -euo pipefail
+          cargo generate-lockfile
+          cargo check --locked --all-targets --features postgres
+          git diff --check
+          changed="$(git diff --name-only)"
+          test "$changed" = "Cargo.lock"
+      - name: Push the regenerated lock
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Cargo.lock
+          git commit -m 'build: regenerate lock for public persistence'
+          git push \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            HEAD:agent/shared-protocol-sdk-foundation
