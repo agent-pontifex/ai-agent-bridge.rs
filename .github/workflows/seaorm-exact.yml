@@ -74,8 +74,12 @@ jobs:
           node --test scripts/seaorm-policy.test.mjs
           node scripts/check-seaorm-policy.mjs
           if git grep -n 'vendor/k8s-libs-and-shared-defs' -- \
-            . ':!.github/workflows/ci.yml' ':!.github/workflows/seaorm-exact.yml'; then
-            echo 'private persistence ownership reference remains' >&2
+            . \
+            ':!.github/workflows/ci.yml' \
+            ':!.github/workflows/seaorm-exact.yml' \
+            ':!scripts/seaorm-policy.mjs' \
+            ':!scripts/seaorm-policy.test.mjs'; then
+            echo 'private persistence ownership reference remains outside policy tests' >&2
             exit 1
           fi
           if git grep -n 'submodules: recursive' -- \
