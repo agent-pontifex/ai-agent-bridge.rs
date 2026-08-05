@@ -1,13 +1,16 @@
 # GitHub Actions workflows
 
-Continuous-integration definitions for the ai-agent-bridge service.
+Continuous-integration definitions for the Agent Pontifex bridge.
 
-- `ci.yml` — runs on every pull request and on pushes to `main`. It checks out
-  the repo with submodules (needed for the pinned `flags-2-env` tool), then
-  enforces formatting, lint (`cargo clippy --locked` with warnings denied), the
-  full test suite, a `--features postgres` compile check, `cargo audit`, and a
-  `flags2env audit` of `.cli-flags.toml`. Rust, the audit tool, actions, and
-  Cargo resolution are pinned.
+- `ci.yml` runs on pull requests and `main`. It validates formatting, Clippy,
+  tests, the public PostgreSQL persistence contract, browser registry behavior,
+  dependency advisories, and the pinned `flags-2-env` audit. Only the public
+  `flags-2-env` submodule is initialized, and only in the job that consumes it.
+- `seaorm-exact.yml` independently provisions PostgreSQL from
+  `persistence/agent-pontifex-persistence/schema.sql` through DPM, then executes
+  the ignored restart durability test with the `postgres` feature.
+- `container-images.yml` builds and scans the four non-root runtime images from
+  the public repository without private submodule credentials.
 
 This folder exists so the same quality gates run identically in CI and locally.
 
