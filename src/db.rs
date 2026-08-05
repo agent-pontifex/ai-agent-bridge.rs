@@ -1,10 +1,11 @@
 //! Optional Postgres persistence (feature = "postgres").
 //!
 //! This is a best-effort mirror of the in-memory state, never on the request
-//! hot path (see [`crate::state::AppState`]'s persistence shims). The canonical
-//! DDL is `pg-defs/schema/schema.sql` in the pinned
-//! `ORESoftware/k8s-libs-and-shared-defs` submodule. Generated SeaORM entities
-//! are adapters only; this service never creates or migrates tables at boot.
+//! hot path (see [`crate::state::AppState`]'s persistence shims). The public
+//! desired-state DDL and table identities live in
+//! `persistence/agent-pontifex-persistence`. Immutable upstream provenance is
+//! recorded there, but no private checkout is required. This service never
+//! creates or migrates tables at boot.
 //!
 //! Most operations remain explicit parameterized PostgreSQL statements because
 //! they depend on data-modifying CTEs, window functions, JSONB expressions,
@@ -97,7 +98,7 @@ struct ContextRow {
 
 impl Db {
     pub async fn connect(url: &str) -> anyhow::Result<Self> {
-        verify_generated_entity_contract();
+        verify_public_entity_contract();
         let mut options = ConnectOptions::new(url.to_owned());
         options
             .max_connections(5)
@@ -501,8 +502,8 @@ fn text_array(values: &[String]) -> Value {
     )
 }
 
-fn verify_generated_entity_contract() {
-    use dd_pg_defs_sea_orm::{
+fn verify_public_entity_contract() {
+    use agent_pontifex_persistence::{
         AgentsEntity, ChannelMembersEntity, ChannelsEntity, MessagesEntity,
         SharedContextEntity,
     };
@@ -530,8 +531,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn shared_entity_contract_names_the_expected_schema_and_tables() {
-        use dd_pg_defs_sea_orm::{
+    fn public_entity_contract_names_the_expected_schema_and_tables() {
+        use agent_pontifex_persistence::{
             AgentsEntity, ChannelMembersEntity, ChannelsEntity, MessagesEntity,
             SharedContextEntity,
         };

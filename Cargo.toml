@@ -59,16 +59,15 @@ sha2 = "0.10"
 # into every later request), and no Result to unwrap.
 parking_lot = "0.12"
 
-# PostgreSQL persistence is optional. The canonical DDL and generated entities
-# are pinned from ORESoftware/k8s-libs-and-shared-defs. This service never runs
-# migrations at boot; DPM diff/verify/apply remains a human-reviewed authority
-# concern in the shared repository.
+# PostgreSQL persistence is optional. The bridge-owned public DDL and table
+# identities live under persistence/agent-pontifex-persistence. Service boot
+# never runs migrations; DPM diff/verify/review/apply remains a human boundary.
 sea-orm = { version = "1.1.20", default-features = false, features = ["macros", "runtime-tokio-rustls", "sqlx-postgres", "postgres-array", "with-uuid", "with-chrono", "with-json"], optional = true }
-dd-pg-defs-sea-orm = { path = "vendor/k8s-libs-and-shared-defs/pg-defs/generated/rust/sea-orm", optional = true }
+agent-pontifex-persistence = { path = "persistence/agent-pontifex-persistence", optional = true }
 
 [features]
 default = []
-postgres = ["dep:sea-orm", "dep:dd-pg-defs-sea-orm"]
+postgres = ["dep:sea-orm", "dep:agent-pontifex-persistence"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time"] }
