@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 import {
@@ -6,42 +7,83 @@ import {
   validateSeaOrmPolicy,
 } from "./seaorm-policy.mjs";
 
-const sharedCommit = "3c84cab532b27d328378f09fba5841f02644ae3b";
+const persistenceSchema = `
+create schema if not exists ai_agent_bridge;
+create table if not exists ai_agent_bridge.agents (id uuid);
+create table if not exists ai_agent_bridge.channels (id uuid);
+create table if not exists ai_agent_bridge.channel_members (id uuid);
+create table if not exists ai_agent_bridge.messages (id uuid);
+create table if not exists ai_agent_bridge.shared_context (id uuid);
+`;
+const persistenceSchemaSha256 = createHash("sha256")
+  .update(persistenceSchema)
+  .digest("hex");
+
 const valid = {
   manifest: `
 [dependencies]
 sea-orm = { version = "1.1.20" }
-dd-pg-defs-sea-orm = { path = "vendor/k8s-libs-and-shared-defs/pg-defs/generated/rust/sea-orm" }
+agent-pontifex-persistence = { path = "persistence/agent-pontifex-persistence" }
 [features]
-postgres = ["dep:sea-orm", "dep:dd-pg-defs-sea-orm"]
+postgres = ["dep:sea-orm", "dep:agent-pontifex-persistence"]
 `,
   databaseSource: `
 use sea_orm::{ConnectOptions, DatabaseConnection, FromQueryResult, Statement, Value};
-fn verify_generated_entity_contract() { let _ = dd_pg_defs_sea_orm::AgentsEntity; }
+fn verify_public_entity_contract() { let _ = agent_pontifex_persistence::AgentsEntity; }
 fn statements(channel_slugs: &[String]) {
   options.sqlx_logging(false);
   let _ = Statement::from_sql_and_values(DbBackend::Postgres, "sql", [text_array(channel_slugs)]);
   let _ = Value::Array(ArrayType::String, None);
 }
-const SQL: &str = "row_number() over (partition by m.channel_slug order by m.seq desc)\nwhere m.channel_slug = any($1::text[])\non conflict (agent_key) do update\non conflict (slug) do update\non conflict (channel_slug, seq) do nothing\non conflict (channel_slug, agent_key) do update\nwhere ai_agent_bridge.shared_context.version < excluded.version\nupdated_at = now()\non conflict (channel_slug, ctx_key) do update";
+const SQL: &str = "row_number() over (partition by m.channel_slug order by m.seq desc)
+where m.channel_slug = any($1::text[])
+on conflict (agent_key) do update
+on conflict (slug) do update
+on conflict (channel_slug, seq) do nothing
+on conflict (channel_slug, agent_key) do update
+where ai_agent_bridge.shared_context.version < excluded.version
+updated_at = now()
+on conflict (channel_slug, ctx_key) do update";
 `,
   restartTest: `
-#[ignore = "requires FIDUCIA_BRIDGE_TEST_DATABASE_URL provisioned from canonical pg-defs schema.sql"]
+#[ignore = "requires FIDUCIA_BRIDGE_TEST_DATABASE_URL provisioned from public Agent Pontifex persistence schema.sql"]
 fn invariants() {
   let _ = "late stale context write is harmless";
   let _ = "sequence must resume above the durable high-water";
   let _ = "presence must be live, not durable";
 }
 `,
-  gitmodules: `[submodule "vendor/k8s-libs-and-shared-defs"]
-path = vendor/k8s-libs-and-shared-defs
-url = https://github.com/ORESoftware/k8s-libs-and-shared-defs.git
+  gitmodules: `[submodule "vendor/flags-2-env"]
+path = vendor/flags-2-env
+url = https://github.com/ORESoftware/flags-2-env.git
 `,
-  sharedContract: {
+  persistenceManifest: `
+[package]
+name = "agent-pontifex-persistence"
+version = "0.1.0"
+[dependencies]
+sea-orm = "1"
+`,
+  persistenceSource: `
+pub struct AgentsEntity;
+pub struct ChannelsEntity;
+pub struct ChannelMembersEntity;
+pub struct MessagesEntity;
+pub struct SharedContextEntity;
+fn schema() -> Option<&'static str> { Some("ai_agent_bridge") }
+`,
+  persistenceContract: {
     schemaAuthority: {
+      repository: "agent-pontifex/ai-agent-bridge.rs",
+      path: "persistence/agent-pontifex-persistence/schema.sql",
+      sha256: persistenceSchemaSha256,
+      serviceBootMigrations: false,
+    },
+    upstreamProvenance: {
       repository: "ORESoftware/k8s-libs-and-shared-defs",
       path: "pg-defs/schema/schema.sql",
-      serviceBootMigrations: false,
+      commit: "3c84cab532b27d328378f09fba5841f02644ae3b",
+      privateCheckoutRequired: false,
     },
     rust: {
       applicationOrm: "SeaORM",
@@ -52,7 +94,8 @@ url = https://github.com/ORESoftware/k8s-libs-and-shared-defs.git
       repository: "declarative-migrations/declarative-postgres-migrate.rs",
     },
   },
-  sharedCommit,
+  persistenceSchema,
+  persistenceSchemaSha256,
 };
 
 function clone(value) {
@@ -70,15 +113,18 @@ function expectInvalid(input, pattern) {
   );
 }
 
-test("the valid fixture binds the service to SeaORM and shared schema ownership", () => {
+test("the public fixture preserves SeaORM and immutable upstream provenance", () => {
   assert.deepEqual(validateSeaOrmPolicy(valid), {
     valid: true,
-    service: "fiducia-ai-agent-bridge",
+    service: "agent-pontifex-ai-agent-bridge",
     applicationOrm: "SeaORM",
-    sharedCommit,
+    schemaAuthority: "agent-pontifex/ai-agent-bridge.rs",
+    upstreamCommit: "3c84cab532b27d328378f09fba5841f02644ae3b",
     statementSemantics: 8,
+    publicTables: 5,
     directSqlx: false,
     bootMigrations: false,
+    privateCheckoutRequired: false,
   });
 });
 
@@ -127,7 +173,7 @@ test("tests cannot duplicate schema DDL or bypass SeaORM", () => {
 
   const copiedSchema = clone(valid);
   copiedSchema.restartTest += "\ncreate table ai_agent_bridge.agents(id uuid);\n";
-  expectInvalid(copiedSchema, /must not duplicate the canonical schema/);
+  expectInvalid(copiedSchema, /must not duplicate the public schema/);
 
   const invariant = clone(valid);
   invariant.restartTest = invariant.restartTest.replace(
@@ -137,27 +183,32 @@ test("tests cannot duplicate schema DDL or bypass SeaORM", () => {
   expectInvalid(invariant, /restart durability invariants must remain covered/);
 });
 
-test("shared schema, DPM, adapter, and immutable pin requirements cannot drift", () => {
-  const mutable = clone(valid);
-  mutable.sharedCommit = "main";
-  expectInvalid(mutable, /immutable commit/);
+test("private checkout, schema drift, and mutable provenance fail closed", () => {
+  const privateSubmodule = clone(valid);
+  privateSubmodule.gitmodules += `
+[submodule "vendor/k8s-libs-and-shared-defs"]
+path = vendor/k8s-libs-and-shared-defs
+url = https://github.com/ORESoftware/k8s-libs-and-shared-defs.git
+`;
+  expectInvalid(privateSubmodule, /private fleet schema must not remain/);
 
-  const missingSubmodule = clone(valid);
-  missingSubmodule.gitmodules = "";
-  expectInvalid(missingSubmodule, /canonical shared definitions submodule is missing/);
-
-  const adapter = clone(valid);
-  adapter.manifest = adapter.manifest.replace(
-    /dd-pg-defs-sea-orm[^\n]+\n/u,
-    "",
+  const privatePath = clone(valid);
+  privatePath.manifest = privatePath.manifest.replace(
+    "persistence/agent-pontifex-persistence",
+    "vendor/k8s-libs-and-shared-defs",
   );
-  expectInvalid(adapter, /consume dd-pg-defs-sea-orm/);
+  expectInvalid(privatePath, /repository-owned path|private fleet schema checkout/);
 
-  const schema = clone(valid);
-  schema.sharedContract.schemaAuthority.path = "service/migrations";
-  expectInvalid(schema, /shared schema authority drifted/);
+  const mutable = clone(valid);
+  mutable.persistenceContract.upstreamProvenance.commit = "main";
+  expectInvalid(mutable, /immutable upstream provenance drifted/);
 
-  const dpm = clone(valid);
-  dpm.sharedContract.migration.repository = "other/migrator";
-  expectInvalid(dpm, /shared DPM repository drifted/);
+  const digest = clone(valid);
+  digest.persistenceContract.schemaAuthority.sha256 = "0".repeat(64);
+  expectInvalid(digest, /schema digest/);
+
+  const extraSchema = clone(valid);
+  extraSchema.persistenceSchema +=
+    "\ncreate schema if not exists unrelated_product;\n";
+  expectInvalid(extraSchema, /must not absorb unrelated fleet schemas/);
 });
