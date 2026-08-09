@@ -228,4 +228,3 @@ async fn slack_ok(response: HttpResponse) -> Result<SlackResponse> {
     }
     Ok(response)
 }
-
