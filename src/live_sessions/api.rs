@@ -244,9 +244,9 @@ fn publish_event(
         let Some(stored) = stored_live_meta(&message) else {
             continue;
         };
-        if stored.session_id != event.session_id
-            || message.from != event.sender
-            || stored.idempotency_key != event.idempotency_key
+        if stored.session_id.as_str() != event.session_id.as_str()
+            || message.from.as_str() != event.sender.as_str()
+            || stored.idempotency_key.as_str() != event.idempotency_key.as_str()
         {
             continue;
         }
@@ -279,8 +279,17 @@ fn publish_event(
     let content_limit = state.config.max_content_bytes.min(16_384).max(1);
     let content = payload_summary(&stored.payload, content_limit);
     let role = role_for_payload(&stored.payload);
-    let meta = json!({ LIVE_META_KEY: stored });
-    let message = state.post_message(slug, &event.sender, role, &content, meta)?;
+    let stored_value = serde_json::to_value(stored)
+        .map_err(|_| LiveError::bad_request("live event metadata could not be serialized"))?;
+    let mut meta = Map::new();
+    meta.insert(LIVE_META_KEY.to_string(), stored_value);
+    let message = state.post_message(
+        slug,
+        &event.sender,
+        role,
+        &content,
+        Value::Object(meta),
+    )?;
     Ok(PublishOutcome {
         message,
         client_event_id,
