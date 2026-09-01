@@ -55,6 +55,8 @@ form_urlencoded = "1"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 libc = "0.2"
+# Keep HMAC and SHA-2 on the same digest 0.10 trait family used by the current
+# Slack signing implementation; upgrades must move both crates and call sites.
 hmac = "0.12"
 sha2 = "0.10"
 # parking_lot RwLock: no lock poisoning (a panic under the lock can't cascade
