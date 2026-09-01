@@ -21,6 +21,7 @@ EXPECTED_PROTOCOLS = {
 }
 EXPECTED_PROVIDERS = {"openai", "anthropic", "google", "xai"}
 
+
 class ConformanceError(RuntimeError):
     """Raised when an observable conformance invariant is not satisfied."""
 
@@ -125,10 +126,19 @@ def validate_matrix(matrix: dict[str, Any]) -> None:
         protocols.add(agent["protocol"])
         if agent["resolution"] not in {"exact", "explicit_substitution"}:
             raise ConformanceError("resolution must be exact or explicit_substitution")
+        if agent["resolution"] == "explicit_substitution":
+            if not isinstance(agent.get("reason"), str) or not agent["reason"].strip():
+                raise ConformanceError(
+                    f"substituted model {agent['agent_key']!r} must include a reason"
+                )
     if providers != EXPECTED_PROVIDERS:
-        raise ConformanceError(f"expected providers {sorted(EXPECTED_PROVIDERS)}, got {sorted(providers)}")
+        raise ConformanceError(
+            f"expected providers {sorted(EXPECTED_PROVIDERS)}, got {sorted(providers)}"
+        )
     if protocols != EXPECTED_PROTOCOLS:
-        raise ConformanceError(f"expected protocols {sorted(EXPECTED_PROTOCOLS)}, got {sorted(protocols)}")
+        raise ConformanceError(
+            f"expected protocols {sorted(EXPECTED_PROTOCOLS)}, got {sorted(protocols)}"
+        )
 
 
 def read_bounded(response: Any, limit: int = MAX_HTTP_RESPONSE_BYTES) -> bytes:
@@ -136,6 +146,25 @@ def read_bounded(response: Any, limit: int = MAX_HTTP_RESPONSE_BYTES) -> bytes:
     if len(payload) > limit:
         raise ConformanceError(f"HTTP response exceeded {limit} bytes")
     return payload
+
+
+def _decode_http_error(payload: bytes, *, redact: bool) -> dict[str, Any] | Any:
+    oversized = len(payload) > MAX_HTTP_RESPONSE_BYTES
+    if redact:
+        return {
+            "error": "redacted_http_error",
+            "response_bytes": len(payload),
+            "response_truncated": oversized,
+        }
+    if oversized:
+        return {
+            "error": "http_error_response_too_large",
+            "response_bytes": len(payload),
+        }
+    try:
+        return json.loads(payload) if payload else None
+    except json.JSONDecodeError:
+        return {"error": "non_json_response", "bytes": len(payload)}
 
 
 def json_request(
@@ -146,24 +175,30 @@ def json_request(
     body: Any | None = None,
     timeout: float = 15.0,
     reject_redirects: bool = False,
+    redact_error_body: bool = False,
 ) -> Any:
     raw = None if body is None else canonical_json(body)
     request_headers = {"Accept": "application/json", **(headers or {})}
     if raw is not None:
         request_headers["Content-Type"] = "application/json"
-    request = urllib.request.Request(url, data=raw, headers=request_headers, method=method)
-    opener = urllib.request.build_opener(RejectRedirects()) if reject_redirects else urllib.request.build_opener()
+    request = urllib.request.Request(
+        url,
+        data=raw,
+        headers=request_headers,
+        method=method,
+    )
+    opener = (
+        urllib.request.build_opener(RejectRedirects())
+        if reject_redirects
+        else urllib.request.build_opener()
+    )
     try:
         with opener.open(request, timeout=timeout) as response:
             payload = read_bounded(response)
             return json.loads(payload) if payload else None
     except urllib.error.HTTPError as error:
         payload = error.read(MAX_HTTP_RESPONSE_BYTES + 1)
-        try:
-            decoded = json.loads(payload) if payload else None
-        except json.JSONDecodeError:
-            decoded = {"error": "non_json_response", "bytes": len(payload)}
+        decoded = _decode_http_error(payload, redact=redact_error_body)
         raise HttpJsonError(error.code, decoded, url) from error
     except urllib.error.URLError as error:
         raise ConformanceError(f"request failed for {url}: {error.reason}") from error
-
