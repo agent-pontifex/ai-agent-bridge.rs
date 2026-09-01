@@ -143,7 +143,14 @@ fn event_digest(event: &PublishEvent) -> LiveResult<String> {
     let bytes = serde_json::to_vec(event).map_err(|_| {
         LiveError::bad_request("live event could not be serialized for idempotency")
     })?;
-    Ok(format!("{:x}", Sha256::digest(bytes)))
+    let digest = Sha256::digest(bytes);
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        encoded.push(HEX[(byte >> 4) as usize] as char);
+        encoded.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    Ok(encoded)
 }
 
 fn stored_live_meta(message: &Message) -> Option<StoredLiveMeta> {

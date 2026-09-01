@@ -1,5 +1,18 @@
+//! Wire types shared by the HTTP and TCP transports. Everything an agent sends
+//! or receives is one of these serde shapes, so the two transports stay in lockstep.
+
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+
+/// ISO-8601 / RFC-3339 UTC timestamp, e.g. `2026-07-08T12:34:56.789Z`.
+pub type Timestamp = String;
+
+pub fn now_ts() -> Timestamp {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+pub fn new_id() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -19,50 +32,44 @@ pub enum AgentKind {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Agent {
     pub agent_key: String,
-    pub display_name: String,
-    pub kind: AgentKind,
-    pub host: Option<String>,
-    pub meta: Value,
-    pub registered_at: String,
-}
-
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum MemberRole {
-    Owner,
-    #[default]
-    Member,
-    Observer,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Member {
-    pub agent_key: String,
-    pub role: MemberRole,
-    pub joined_at: String,
-    pub last_seen_at: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Channel {
-    pub slug: String,
-    pub topic: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub topic_summary: Option<String>,
-    pub created_by: String,
-    pub created_at: String,
-    pub member_count: usize,
-    pub message_count: u64,
-    pub embedding_model: String,
     #[serde(default)]
-    pub meta: Value,
+    pub display_name: String,
+    #[serde(default)]
+    pub kind: AgentKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    #[serde(default)]
+    pub meta: serde_json::Value,
+    #[serde(default = "now_ts")]
+    pub registered_at: Timestamp,
 }
 
+/// A time-bounded claim that an agent is working on a repository-relative path.
+/// `recursive` leases cover the named directory and every descendant; ordinary
+/// leases cover exactly one file/path. `fencing_token` changes whenever a new
+/// owner acquires the path, so stale workers cannot renew or release a successor.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ScoredChannel {
-    #[serde(flatten)]
-    pub channel: Channel,
-    pub score: f32,
+pub struct FileLease {
+    pub id: String,
+    pub repository: String,
+    pub path: String,
+    pub recursive: bool,
+    pub agent_key: String,
+    #[serde(default)]
+    pub purpose: String,
+    #[serde(default)]
+    pub meta: serde_json::Value,
+    pub fencing_token: u64,
+    pub acquired_at: Timestamp,
+    pub expires_at: Timestamp,
+}
+
+/// File ownership lookup result, joining the active lease with the bridge's
+/// registered agent record so callers do not need a second request.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FileLeaseHolder {
+    pub lease: FileLease,
+    pub agent: Agent,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -75,54 +82,85 @@ pub enum Role {
     Tool,
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum MemberRole {
+    Owner,
+    #[default]
+    Member,
+    /// May read the stream but is not counted as an active chatter in presence
+    /// (still counts against the 32 cap — a seat is a seat).
+    Observer,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Member {
+    pub agent_key: String,
+    #[serde(default)]
+    pub role: MemberRole,
+    pub joined_at: Timestamp,
+    pub last_seen_at: Timestamp,
+}
+
+/// A single chat message in a channel. `seq` is a per-channel monotonic counter
+/// (1-based) so clients can page and dedupe deterministically.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Message {
     pub id: String,
     pub channel: String,
     pub seq: u64,
+    /// `agent_key` of the sender.
     pub from: String,
+    #[serde(default)]
     pub role: Role,
     pub content: String,
-    pub meta: Value,
-    pub created_at: String,
+    #[serde(default)]
+    pub meta: serde_json::Value,
+    pub created_at: Timestamp,
+}
+
+/// Public view of a channel (embedding vector intentionally omitted).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Channel {
+    pub slug: String,
+    pub topic: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub topic_summary: Option<String>,
+    pub created_by: String,
+    pub created_at: Timestamp,
+    pub member_count: usize,
+    pub message_count: u64,
+    pub embedding_model: String,
+    #[serde(default)]
+    pub meta: serde_json::Value,
+}
+
+/// A channel returned by semantic search, with its cosine score against the query.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ScoredChannel {
+    #[serde(flatten)]
+    pub channel: Channel,
+    pub score: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ContextEntry {
     pub key: String,
-    pub value: Value,
+    pub value: serde_json::Value,
     pub version: u32,
     pub updated_by: String,
-    pub updated_at: String,
+    pub updated_at: Timestamp,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FileLease {
-    pub id: String,
-    pub repository: String,
-    pub path: String,
-    pub recursive: bool,
-    pub agent_key: String,
-    pub purpose: String,
-    pub meta: Value,
-    pub fencing_token: u64,
-    pub acquired_at: String,
-    pub expires_at: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FileLeaseHolder {
-    pub lease: FileLease,
-    pub agent: Agent,
-}
-
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PresenceKind {
     Joined,
     Left,
 }
 
+/// Everything that fans out to subscribers (SSE + TCP). Tagged so a client can
+/// switch on `type`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
@@ -132,7 +170,7 @@ pub enum Event {
         agent_key: String,
         event: PresenceKind,
         member_count: usize,
-        at: String,
+        at: Timestamp,
     },
 }
 
