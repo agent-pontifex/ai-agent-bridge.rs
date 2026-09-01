@@ -1,0 +1,80 @@
+name: DEN-1873 generated digest-family lock repair
+
+# This carrier is intentionally introduced before this follow-up push so GitHub
+# evaluates its branch-local push trigger, then removes itself after validation.
+on:
+  push:
+    branches:
+      - fix/den-1873-ci-baseline
+    paths:
+      - ".github/workflows/den-1873-lock-refresh-v2.yml"
+      - "Cargo.toml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: den-1873-digest-lock-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    if: >-
+      github.repository == 'agent-pontifex/ai-agent-bridge.rs' &&
+      github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Check out the exact repair branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: fix/den-1873-ci-baseline
+          fetch-depth: 0
+          persist-credentials: true
+          show-progress: false
+          submodules: false
+
+      - name: Install the repository Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: "1.95.0"
+          components: rustfmt, clippy
+
+      - name: Generate and certify the compatible digest graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "fix/den-1873-ci-baseline"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+          # The existing Slack source imports the HMAC 0.12 / digest 0.10 API.
+          # Cargo, not this workflow, owns the exact transitive lock changes.
+          cargo metadata --format-version 1 >/dev/null
+          cargo metadata --locked --format-version 1 >/dev/null
+          cargo fmt --all -- --check
+          cargo clippy --locked --all-targets --all-features -- -D warnings
+          cargo test --locked --all-targets --all-features
+          cargo build --locked --all-targets --all-features
+          git diff --check
+
+          mapfile -t changed < <(git diff --name-only)
+          test "${#changed[@]}" -eq 1
+          test "${changed[0]}" = "Cargo.lock"
+
+      - name: Commit the Cargo-generated lock and remove this one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/den-1873-lock-refresh-v2.yml
+          git add Cargo.lock
+          git diff --cached --check
+
+          mapfile -t changed < <(git diff --cached --name-only | sort)
+          test "${#changed[@]}" -eq 2
+          test "${changed[0]}" = ".github/workflows/den-1873-lock-refresh-v2.yml"
+          test "${changed[1]}" = "Cargo.lock"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(DEN-1873): commit the Cargo-generated digest lock repair"
+          git push origin HEAD:fix/den-1873-ci-baseline
