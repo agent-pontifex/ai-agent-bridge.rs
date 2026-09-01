@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import secrets
 import time
 from pathlib import Path
@@ -28,6 +29,21 @@ def _execution_identity(spec: dict[str, Any]) -> str:
     )
 
 
+def _preflight_live_credentials(matrix: dict[str, Any]) -> None:
+    missing = sorted(
+        {
+            spec["credential_env"]
+            for spec in matrix["agents"]
+            if not os.environ.get(spec["credential_env"], "")
+        }
+    )
+    if missing:
+        raise ConformanceError(
+            "missing live provider credential environment variables: "
+            + ", ".join(missing)
+        )
+
+
 def run_roundtable(
     *,
     bridge_url: str,
@@ -40,6 +56,7 @@ def run_roundtable(
 ) -> dict[str, Any]:
     if mode == "live":
         assert_substitution_acknowledged(matrix, acknowledge_substitutions)
+        _preflight_live_credentials(matrix)
     elif mode != "mock":
         raise ConformanceError(f"unsupported mode {mode!r}")
 
