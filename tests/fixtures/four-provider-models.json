@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-09-01",
+  "realtime_semantics": "turn_level_sse",
+  "agents": [
+    {
+      "agent_key": "grok-4-6",
+      "requested_label": "Grok 4.6",
+      "provider": "xai",
+      "model": "grok-4.6",
+      "protocol": "xai_chat_completions",
+      "kind": "grok",
+      "credential_env": "XAI_API_KEY",
+      "resolution": "exact",
+      "source": "https://docs.x.ai/developers/models/grok-4.6"
+    },
+    {
+      "agent_key": "gemini-3-6-pro",
+      "requested_label": "Gemini 3.6 Pro",
+      "provider": "google",
+      "model": "gemini-3.1-pro-preview",
+      "protocol": "gemini_generate_content",
+      "kind": "gemini",
+      "credential_env": "GEMINI_API_KEY",
+      "resolution": "explicit_substitution",
+      "reason": "Google lists Gemini 3.6 Flash and Gemini 3.1 Pro Preview, but no Gemini 3.6 Pro API model.",
+      "source": "https://ai.google.dev/gemini-api/docs/models"
+    },
+    {
+      "agent_key": "claude-opus-5",
+      "requested_label": "Claude Opus 5",
+      "provider": "anthropic",
+      "model": "claude-opus-5",
+      "protocol": "anthropic_messages",
+      "kind": "claude",
+      "credential_env": "ANTHROPIC_API_KEY",
+      "resolution": "exact",
+      "source": "https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions"
+    },
+    {
+      "agent_key": "chatgpt-sol-4-6",
+      "requested_label": "ChatGPT Sol 4.6",
+      "provider": "openai",
+      "model": "gpt-5.6-sol",
+      "protocol": "openai_responses",
+      "kind": "chatgpt",
+      "credential_env": "OPENAI_API_KEY",
+      "resolution": "explicit_substitution",
+      "reason": "OpenAI lists GPT-5.6 Sol as gpt-5.6-sol; no ChatGPT Sol 4.6 API model is listed.",
+      "source": "https://platform.openai.com/docs/models"
+    }
+  ]
+}
