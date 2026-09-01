@@ -9,10 +9,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::convert::Infallible;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{DefaultBodyLimit, Path, Query, State},
     http::StatusCode,
+    middleware::{from_fn, from_fn_with_state, Next},
     response::sse::{Event as SseEvent, KeepAlive, Sse},
     response::{IntoResponse, Response},
     routing::get,
@@ -46,7 +48,8 @@ const MAX_IDEMPOTENCY_BYTES: usize = 128;
 
 static LIVE_PUBLISH_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
-pub fn router() -> Router<Arc<AppState>> {
+pub fn router(state: Arc<AppState>) -> Router {
+    let body_limit = state.config.max_http_body_bytes;
     Router::new()
         .route("/live-sessions/{slug}", get(get_live_session))
         .route(
@@ -57,6 +60,47 @@ pub fn router() -> Router<Arc<AppState>> {
             "/live-sessions/{slug}/stream",
             get(stream_live_session),
         )
+        .layer(from_fn_with_state(state.clone(), live_auth))
+        .layer(DefaultBodyLimit::max(body_limit))
+        .layer(from_fn(live_request_timeout))
+        .layer(tower_http::trace::TraceLayer::new_for_http())
+        .layer(tower_http::catch_panic::CatchPanicLayer::new())
+        .with_state(state)
+}
+
+async fn live_request_timeout(request: axum::extract::Request, next: Next) -> Response {
+    match tokio::time::timeout(Duration::from_secs(30), next.run(request)).await {
+        Ok(response) => response,
+        Err(_) => LiveError::new(
+            StatusCode::GATEWAY_TIMEOUT,
+            "request_timeout",
+            "live-session request timed out",
+        )
+        .into_response(),
+    }
+}
+
+async fn live_auth(
+    State(state): State<Arc<AppState>>,
+    request: axum::extract::Request,
+    next: Next,
+) -> Response {
+    if let Some(expected) = &state.config.api_auth_bearer {
+        let presented = request
+            .headers()
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.strip_prefix("Bearer "));
+        let authorized = presented
+            .map(|value| {
+                crate::config::constant_time_eq(value.as_bytes(), expected.as_bytes())
+            })
+            .unwrap_or(false);
+        if !authorized {
+            return LiveError::from(BridgeError::Unauthorized).into_response();
+        }
+    }
+    next.run(request).await
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
