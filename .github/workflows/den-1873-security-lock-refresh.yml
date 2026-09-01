@@ -1,0 +1,103 @@
+name: DEN-1873 generated security lock repair
+
+on:
+  push:
+    branches:
+      - fix/den-1873-ci-baseline
+    paths:
+      - ".github/workflows/den-1873-security-lock-refresh.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: den-1873-security-lock-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    if: >-
+      github.repository == 'agent-pontifex/ai-agent-bridge.rs' &&
+      github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out the exact repair branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: fix/den-1873-ci-baseline
+          fetch-depth: 0
+          persist-credentials: true
+          show-progress: false
+          submodules: false
+
+      - name: Install the repository Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: "1.95.0"
+          components: rustfmt, clippy
+
+      - name: Install the pinned RustSec scanner
+        uses: taiki-e/install-action@7572810d7dd469b651bb7793945692cf78da5dd7 # v2.67.19
+        with:
+          tool: cargo-audit@0.22.2
+
+      - name: Generate and certify the patch-level security updates
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "fix/den-1873-ci-baseline"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+          # Cargo owns the lockfile. These are the minimum fixed patch releases
+          # named by RustSec / crates.io; no manifest range or source API changes.
+          cargo update -p h2@0.4.15 --precise 0.4.16
+          cargo update -p chacha20@0.10.1 --precise 0.10.2
+          cargo metadata --locked --format-version 1 >/dev/null
+
+          cargo fmt --all -- --check
+          cargo clippy --locked --all-targets --all-features -- -D warnings
+          cargo test --locked --all-targets --all-features
+          cargo build --locked --all-targets --all-features
+
+          cargo tree --locked --edges normal,build,dev > "${RUNNER_TEMP}/cargo-tree-default.txt"
+          cargo tree --locked --edges normal,build,dev --features postgres > "${RUNNER_TEMP}/cargo-tree-postgres.txt"
+          if grep -F 'rkyv v0.7.46' "${RUNNER_TEMP}"/cargo-tree-*.txt; then
+            echo 'RUSTSEC-2026-0235 is reachable in a compiled dependency graph' >&2
+            exit 1
+          fi
+          if grep -F 'h2 v0.4.15' "${RUNNER_TEMP}"/cargo-tree-*.txt; then
+            echo 'vulnerable h2 remains reachable' >&2
+            exit 1
+          fi
+          if grep -F 'chacha20 v0.10.1' "${RUNNER_TEMP}"/cargo-tree-*.txt; then
+            echo 'yanked chacha20 remains reachable' >&2
+            exit 1
+          fi
+
+          # The lock retains rust_decimal's optional rkyv metadata, but the two
+          # compiled graphs above prove it is not selected.
+          cargo audit --ignore RUSTSEC-2026-0235
+          git diff --check
+
+          mapfile -t changed < <(git diff --name-only)
+          test "${#changed[@]}" -eq 1
+          test "${changed[0]}" = "Cargo.lock"
+
+      - name: Commit Cargo's lockfile and remove this one-shot carrier
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/den-1873-security-lock-refresh.yml
+          git add Cargo.lock
+          git diff --cached --check
+
+          mapfile -t changed < <(git diff --cached --name-only | sort)
+          test "${#changed[@]}" -eq 2
+          test "${changed[0]}" = ".github/workflows/den-1873-security-lock-refresh.yml"
+          test "${changed[1]}" = "Cargo.lock"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix(DEN-1873): commit Cargo's audited patch updates"
+          git push origin HEAD:fix/den-1873-ci-baseline
