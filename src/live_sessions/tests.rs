@@ -28,6 +28,15 @@ mod tests {
         let second = event_digest(&event).unwrap();
         assert_eq!(first, second);
         assert_eq!(first.len(), 64);
+        assert!(
+            first
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        );
+
+        let mut changed = event.clone();
+        changed.payload["summary"] = json!("Changed proposal summary.");
+        assert_ne!(first, event_digest(&changed).unwrap());
     }
 
     #[test]
