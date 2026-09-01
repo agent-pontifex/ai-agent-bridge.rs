@@ -99,7 +99,9 @@ def provider_response_text(protocol: str, payload: dict[str, Any]) -> str:
             texts = []
             for candidate in payload.get("candidates", []):
                 for part in candidate.get("content", {}).get("parts", []):
-                    if isinstance(part.get("text"), str) and not part.get("thought", False):
+                    if isinstance(part.get("text"), str) and not part.get(
+                        "thought", False
+                    ):
                         texts.append(part["text"])
             return bounded_text("\n".join(texts))
         if protocol == "xai_chat_completions":
@@ -140,6 +142,7 @@ def invoke_provider(
             body=body,
             timeout=PROVIDER_TIMEOUT_SECONDS,
             reject_redirects=True,
+            redact_error_body=True,
         )
     else:
         raise ConformanceError(f"unsupported mode {mode!r}")
@@ -150,4 +153,3 @@ def invoke_provider(
         response_sha256=sha256_text(text),
         response_bytes=len(text.encode("utf-8")),
     )
-
