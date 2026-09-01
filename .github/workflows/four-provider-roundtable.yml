@@ -57,18 +57,19 @@ jobs:
       - name: Exercise four independent SSE subscribers and eight provider turns
         shell: bash
         env:
-          BRIDGE_BEARER: agent-pontifex-roundtable-ci-only
+          AGENT_PONTIFEX_BRIDGE_BEARER: agent-pontifex-roundtable-ci-only
         run: |
           set -euo pipefail
           state_dir="${RUNNER_TEMP}/agent-pontifex-roundtable-state"
+          bridge_log="${RUNNER_TEMP}/four-provider-bridge.log"
           mkdir -p "$state_dir" artifacts
           HOST=127.0.0.1 \
           HTTP_PORT=18142 \
           TCP_PORT=0 \
-          API_AUTH_BEARER="$BRIDGE_BEARER" \
+          API_AUTH_BEARER="$AGENT_PONTIFEX_BRIDGE_BEARER" \
           AI_AGENT_BRIDGE_DIR="$state_dir" \
           RUST_LOG=info \
-          target/debug/fiducia-ai-agent-bridge >artifacts/four-provider-bridge.log 2>&1 &
+          target/debug/fiducia-ai-agent-bridge >"$bridge_log" 2>&1 &
           bridge_pid=$!
           cleanup() {
             kill "$bridge_pid" 2>/dev/null || true
@@ -81,7 +82,7 @@ jobs:
               break
             fi
             if ! kill -0 "$bridge_pid" 2>/dev/null; then
-              cat artifacts/four-provider-bridge.log >&2
+              cat "$bridge_log" >&2
               exit 1
             fi
             sleep 0.25
@@ -91,16 +92,13 @@ jobs:
           python3 scripts/four_provider_roundtable.py \
             --mode mock \
             --bridge-url http://127.0.0.1:18142 \
-            --bridge-bearer "$BRIDGE_BEARER" \
             --evidence-out artifacts/four-provider-roundtable.json
 
-      - name: Upload metadata-only evidence and bridge log
+      - name: Upload metadata-only evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: four-provider-roundtable-${{ github.run_id }}
-          path: |
-            artifacts/four-provider-roundtable.json
-            artifacts/four-provider-bridge.log
+          path: artifacts/four-provider-roundtable.json
           if-no-files-found: warn
           retention-days: 14
