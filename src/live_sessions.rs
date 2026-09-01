@@ -56,10 +56,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/live-sessions/{slug}/events",
             get(list_live_events).post(post_live_event),
         )
-        .route(
-            "/live-sessions/{slug}/stream",
-            get(stream_live_session),
-        )
+        .route("/live-sessions/{slug}/stream", get(stream_live_session))
         .layer(from_fn_with_state(state.clone(), live_auth))
         .layer(DefaultBodyLimit::max(body_limit))
         .layer(from_fn(live_request_timeout))
@@ -92,9 +89,7 @@ async fn live_auth(
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.strip_prefix("Bearer "));
         let authorized = presented
-            .map(|value| {
-                crate::config::constant_time_eq(value.as_bytes(), expected.as_bytes())
-            })
+            .map(|value| crate::config::constant_time_eq(value.as_bytes(), expected.as_bytes()))
             .unwrap_or(false);
         if !authorized {
             return LiveError::from(BridgeError::Unauthorized).into_response();
