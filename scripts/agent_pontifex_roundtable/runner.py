@@ -10,8 +10,22 @@ from typing import Any
 
 from .bridge import BridgeClient, SSECollector
 from .common import ConformanceError, HttpJsonError, PublishedEvent
-from .protocol import event_frames, make_publish_body, transcript_from
+from .protocol import (
+    assert_substitution_acknowledged,
+    event_frames,
+    make_publish_body,
+    transcript_from,
+)
 from .providers import invoke_provider
+
+
+def _execution_identity(spec: dict[str, Any]) -> str:
+    if spec["resolution"] == "exact":
+        return spec["requested_label"]
+    return (
+        f"{spec['requested_label']} request executed by the explicitly declared "
+        f"substitute API model {spec['model']}"
+    )
 
 
 def run_roundtable(
@@ -22,7 +36,13 @@ def run_roundtable(
     mode: str,
     evidence_path: Path,
     timeout_seconds: float,
+    acknowledge_substitutions: bool = False,
 ) -> dict[str, Any]:
+    if mode == "live":
+        assert_substitution_acknowledged(matrix, acknowledge_substitutions)
+    elif mode != "mock":
+        raise ConformanceError(f"unsupported mode {mode!r}")
+
     bridge = BridgeClient(bridge_url, bridge_bearer)
     nonce = secrets.token_hex(8)
     agents: list[dict[str, Any]] = matrix["agents"]
@@ -76,9 +96,11 @@ def run_roundtable(
         for index, spec in enumerate(agents):
             peers = tuple(key for key in agent_keys if key != spec["agent_key"])
             prompt = (
-                f"You are {spec['requested_label']} in Agent Pontifex conformance session {nonce}. "
-                "Publish one concise, externally observable bridge reliability invariant. "
-                "Do not expose hidden reasoning, private traces, credentials, or claim unobserved side effects."
+                f"You are {_execution_identity(spec)} in Agent Pontifex "
+                f"conformance session {nonce}. "
+                "Publish one concise, externally observable bridge reliability "
+                "invariant. Do not expose hidden reasoning, private traces, "
+                "credentials, or claim unobserved side effects."
             )
             result = invoke_provider(spec, prompt, mode, ())
             content = f"{spec['requested_label']}: {result.text}"
@@ -144,11 +166,14 @@ def run_roundtable(
         for spec in agents:
             peers = tuple(key for key in agent_keys if key != spec["agent_key"])
             prompt = (
-                f"You are {spec['requested_label']} in Agent Pontifex conformance session {nonce}.\n"
+                f"You are {_execution_identity(spec)} in Agent Pontifex "
+                f"conformance session {nonce}.\n"
                 f"You received observable turns from these peers: {', '.join(peers)}.\n"
-                "Review every peer turn below and publish one concise interoperability handoff. "
-                "Do not expose hidden reasoning, private traces, credentials, or claim unobserved side effects.\n\n"
-                f"OBSERVABLE_TRANSCRIPT_BEGIN\n{transcript}\nOBSERVABLE_TRANSCRIPT_END"
+                "Review every peer turn below and publish one concise "
+                "interoperability handoff. Do not expose hidden reasoning, "
+                "private traces, credentials, or claim unobserved side effects.\n\n"
+                f"OBSERVABLE_TRANSCRIPT_BEGIN\n{transcript}\n"
+                "OBSERVABLE_TRANSCRIPT_END"
             )
             result = invoke_provider(spec, prompt, mode, peers)
             content = (
@@ -253,6 +278,9 @@ def run_roundtable(
             "mode": mode,
             "realtime_semantics": "turn_level_sse",
             "session_id": slug,
+            "model_substitutions_acknowledged": (
+                acknowledge_substitutions if mode == "live" else None
+            ),
             "participants": [
                 {
                     "agent_key": agent["agent_key"],
@@ -301,4 +329,3 @@ def run_roundtable(
     finally:
         for collector in collectors:
             collector.stop()
-
