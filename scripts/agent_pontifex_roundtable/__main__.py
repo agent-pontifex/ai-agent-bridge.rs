@@ -10,6 +10,8 @@ from pathlib import Path
 from .common import ConformanceError, load_matrix
 from .runner import run_roundtable
 
+ROOT = Path(__file__).resolve().parents[2]
+
 
 def _positive_timeout(value: str) -> float:
     parsed = float(value)
@@ -28,7 +30,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--bridge-url",
-        default="http://127.0.0.1:8142",
+        default="http://127.0.0.1:18142",
         help="Loopback HTTP origin for the bridge",
     )
     parser.add_argument(
@@ -39,7 +41,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--matrix",
         type=Path,
-        default=Path("tests/fixtures/four-provider-models.json"),
+        default=ROOT / "tests" / "fixtures" / "four-provider-models.json",
     )
     parser.add_argument("--mode", choices=("mock", "live"), default="mock")
     parser.add_argument(
@@ -50,7 +52,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--evidence",
         type=Path,
-        default=Path("target/agent-pontifex-roundtable-evidence.json"),
+        default=ROOT / "target" / "agent-pontifex-roundtable-evidence.json",
     )
     parser.add_argument("--timeout-seconds", type=_positive_timeout, default=45.0)
     return parser
