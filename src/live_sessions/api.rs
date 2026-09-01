@@ -280,7 +280,7 @@ fn publish_event(
         payload: event.payload,
         extensions: event.extensions,
     };
-    let content_limit = state.config.max_content_bytes.min(16_384).max(1);
+    let content_limit = state.config.max_content_bytes.clamp(1, 16_384);
     let content = payload_summary(&stored.payload, content_limit);
     let role = role_for_payload(&stored.payload);
     let stored_value = serde_json::to_value(stored)
