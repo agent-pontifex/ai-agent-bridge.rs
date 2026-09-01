@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = ROOT / "scripts" / "four_provider_roundtable.py"
@@ -87,6 +89,30 @@ class FourProviderRoundtableTests(unittest.TestCase):
         with self.assertRaises(roundtable.ConformanceError):
             roundtable.assert_substitution_acknowledged(self.matrix, False)
         roundtable.assert_substitution_acknowledged(self.matrix, True)
+
+    def test_live_runner_preflights_all_credentials_before_bridge_access(self) -> None:
+        provider_env_names = {
+            agent["credential_env"] for agent in self.matrix["agents"]
+        }
+        scrubbed = {
+            key: value
+            for key, value in os.environ.items()
+            if key not in provider_env_names
+        }
+        with patch.dict(os.environ, scrubbed, clear=True):
+            with self.assertRaisesRegex(
+                roundtable.ConformanceError,
+                "ANTHROPIC_API_KEY.*GEMINI_API_KEY.*OPENAI_API_KEY.*XAI_API_KEY",
+            ):
+                roundtable.run_roundtable(
+                    bridge_url="http://127.0.0.1:9",
+                    bridge_bearer="not-used-because-preflight-fails",
+                    matrix=self.matrix,
+                    mode="live",
+                    evidence_path=ROOT / "target" / "should-not-exist.json",
+                    timeout_seconds=1.0,
+                    acknowledge_substitutions=True,
+                )
 
     def test_message_payload_uses_extension_for_metadata(self) -> None:
         agent = self.matrix["agents"][0]
