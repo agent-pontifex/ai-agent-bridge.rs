@@ -18,6 +18,7 @@ pub mod error;
 pub mod http;
 pub mod lease_descriptors;
 pub mod lease_renewal;
+pub mod live_sessions;
 pub mod metrics;
 pub mod orchestration;
 pub mod policy;
