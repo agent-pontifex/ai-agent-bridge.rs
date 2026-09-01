@@ -92,12 +92,16 @@ async fn stream_live_session(
             )
         })?;
 
-    let agent_key = query
+    if query
         .agent_key
         .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let (receiver, high_water) = state.subscribe(&slug, agent_key)?;
+        .is_some_and(|value| !value.trim().is_empty())
+    {
+        return Err(LiveError::bad_request(
+            "live-session streams do not accept a caller-supplied agent identity; join the channel first",
+        ));
+    }
+    let (receiver, high_water) = state.subscribe(&slug, None)?;
     validate_sequence(high_water, true)?;
     if after_seq > high_water {
         return Err(LiveError::conflict(
