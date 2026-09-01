@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import json
 import os
 import sys
+import tempfile
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,14 +19,14 @@ assert SPEC and SPEC.loader
 roundtable = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = roundtable
 SPEC.loader.exec_module(roundtable)
+common = importlib.import_module("agent_pontifex_roundtable.common")
 
 
 class FourProviderRoundtableTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.matrix = roundtable.load_matrix(
-            ROOT / "tests" / "fixtures" / "four-provider-models.json"
-        )
+        cls.matrix_path = ROOT / "tests" / "fixtures" / "four-provider-models.json"
+        cls.matrix = roundtable.load_matrix(cls.matrix_path)
         cls.by_protocol = {
             agent["protocol"]: agent for agent in cls.matrix["agents"]
         }
@@ -90,6 +94,18 @@ class FourProviderRoundtableTests(unittest.TestCase):
             roundtable.assert_substitution_acknowledged(self.matrix, False)
         roundtable.assert_substitution_acknowledged(self.matrix, True)
 
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(roundtable.ConformanceError):
+                roundtable.run_roundtable(
+                    bridge_url="http://127.0.0.1:1",
+                    bridge_bearer="loopback-only",
+                    matrix=self.matrix,
+                    mode="live",
+                    evidence_path=Path(directory) / "evidence.json",
+                    timeout_seconds=1.0,
+                    acknowledge_substitutions=False,
+                )
+
     def test_live_runner_preflights_all_credentials_before_bridge_access(self) -> None:
         provider_env_names = {
             agent["credential_env"] for agent in self.matrix["agents"]
@@ -113,6 +129,68 @@ class FourProviderRoundtableTests(unittest.TestCase):
                     timeout_seconds=1.0,
                     acknowledge_substitutions=True,
                 )
+
+    def test_cli_keeps_bearer_out_of_arguments_and_gates_live_calls(self) -> None:
+        args = roundtable.parse_args([])
+        self.assertFalse(hasattr(args, "bridge_bearer"))
+        self.assertEqual(
+            args.bridge_bearer_env, "AGENT_PONTIFEX_BRIDGE_BEARER"
+        )
+        with patch.dict(
+            os.environ,
+            {"AGENT_PONTIFEX_BRIDGE_BEARER": "loopback-only"},
+            clear=True,
+        ):
+            with self.assertRaises(roundtable.ConformanceError) as raised:
+                roundtable.main(
+                    [
+                        "--mode",
+                        "live",
+                        "--acknowledge-substitutions",
+                        "--matrix",
+                        str(self.matrix_path),
+                    ]
+                )
+        self.assertIn(
+            "AGENT_PONTIFEX_ALLOW_LIVE_PROVIDER_CALLS",
+            str(raised.exception),
+        )
+
+    def test_live_http_error_body_is_redacted(self) -> None:
+        secret_body = "provider-private-error-body"
+
+        class ErrorHandler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802
+                payload = json.dumps({"error": secret_body}).encode("utf-8")
+                self.send_response(401)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, _format: str, *_args: object) -> None:
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), ErrorHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with self.assertRaises(roundtable.HttpJsonError) as raised:
+                common.json_request(
+                    f"http://127.0.0.1:{server.server_port}/error",
+                    redact_error_body=True,
+                )
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+        rendered = json.dumps(raised.exception.payload, sort_keys=True)
+        self.assertNotIn(secret_body, rendered)
+        self.assertEqual(
+            raised.exception.payload["error"], "redacted_http_error"
+        )
+        self.assertGreater(raised.exception.payload["response_bytes"], 0)
 
     def test_message_payload_uses_extension_for_metadata(self) -> None:
         agent = self.matrix["agents"][0]
