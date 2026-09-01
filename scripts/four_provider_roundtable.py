@@ -22,22 +22,28 @@ if str(SCRIPT_DIR) not in sys.path:
 from agent_pontifex_roundtable import (  # noqa: E402
     ConformanceError,
     HttpJsonError,
-    ProviderResult,
-    assert_substitution_acknowledged,
-    invoke_provider,
     load_matrix,
-    make_publish_body,
-    provider_request,
-    provider_response_text,
     run_roundtable,
 )
+
+
+def bounded_timeout(value: str) -> float:
+    parsed = float(value)
+    if not 1.0 <= parsed <= 600.0:
+        raise argparse.ArgumentTypeError("timeout must be between 1 and 600 seconds")
+    return parsed
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bridge-url", default="http://127.0.0.1:18142")
     parser.add_argument(
-        "--bridge-bearer", default=os.environ.get("BRIDGE_BEARER", "")
+        "--bridge-bearer-env",
+        default="AGENT_PONTIFEX_BRIDGE_BEARER",
+        help=(
+            "environment variable containing the loopback bridge bearer; "
+            "the bearer is never accepted on the command line"
+        ),
     )
     parser.add_argument(
         "--matrix",
@@ -51,24 +57,35 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         type=Path,
         default=Path("artifacts/four-provider-roundtable.json"),
     )
-    parser.add_argument("--timeout-seconds", type=float, default=30.0)
+    parser.add_argument(
+        "--timeout-seconds", type=bounded_timeout, default=30.0
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
-    if not args.bridge_bearer:
-        raise ConformanceError("--bridge-bearer or BRIDGE_BEARER is required")
+    bridge_bearer = os.environ.get(args.bridge_bearer_env, "")
+    if not bridge_bearer:
+        raise ConformanceError(
+            f"bridge bearer environment variable {args.bridge_bearer_env!r} is required"
+        )
+    if args.mode == "live" and os.environ.get(
+        "AGENT_PONTIFEX_ALLOW_LIVE_PROVIDER_CALLS"
+    ) != "1":
+        raise ConformanceError(
+            "live provider calls require AGENT_PONTIFEX_ALLOW_LIVE_PROVIDER_CALLS=1"
+        )
+
     matrix = load_matrix(args.matrix)
-    if args.mode == "live":
-        assert_substitution_acknowledged(matrix, args.acknowledge_substitutions)
     evidence = run_roundtable(
         bridge_url=args.bridge_url,
-        bridge_bearer=args.bridge_bearer,
+        bridge_bearer=bridge_bearer,
         matrix=matrix,
         mode=args.mode,
         evidence_path=args.evidence_out,
         timeout_seconds=args.timeout_seconds,
+        acknowledge_substitutions=args.acknowledge_substitutions,
     )
     print(
         json.dumps(
