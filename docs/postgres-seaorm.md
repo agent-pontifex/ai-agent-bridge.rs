@@ -1,12 +1,11 @@
 # PostgreSQL persistence: SeaORM over the public Agent Pontifex contract
-# Postgres persistence: SeaORM over the shared declarative schema
 
 The bridge is in-memory first. Building with `--features postgres` adds a
 best-effort durable mirror and restart restoration through **SeaORM**.
 
 ## Schema and migration ownership
 
-The bridge repository owns its narrow public DDL contract, but the application
+The bridge repository owns its narrow public DDL contract. The application
 never runs migrations at startup.
 
 | Concern | Authority |
@@ -19,26 +18,16 @@ never runs migrations at startup.
 
 The five-table contract was extracted from
 `ORESoftware/k8s-libs-and-shared-defs/pg-defs/schema/schema.sql` at immutable
-commit `3c84cab532b27d328378f09fba5841f02644ae3b`. That repository remains
-documented provenance, not a build, CI, or deployment dependency. The public
+commit `3c84cab532b27d328378f09fba5841f02644ae3b`. That private repository is
+recorded only as provenance. It is not a build, CI, runtime, or deployment
+dependency, and consumers do not need credentials for it. The public persistence
 crate and schema travel with the same bridge commit that consumes them.
-The application does not own DDL or run migrations at startup.
 
-| Concern | Authority |
-| --- | --- |
-| Canonical shared DDL | `vendor/k8s-libs-and-shared-defs/pg-defs/schema/schema.sql` |
-| Generated entities | `vendor/k8s-libs-and-shared-defs/pg-defs/generated/rust/sea-orm` |
-| Migration diff / verify / reviewed apply | `declarative-migrations/declarative-postgres-migrate.rs` through the pinned shared `dpm.sh` wrapper |
-| Runtime connection, restore, and writes | `src/db.rs` through SeaORM |
+## Why several queries remain explicit statements
 
-The shared repository is pinned as an immutable Git submodule. Generated
-entities are adapters to the DDL contract; they are not migration sources.
-
-## Why several queries remain explicit Statements
-
-Ordinary application persistence is SeaORM. Some bridge operations deliberately
-use parameterized `sea_orm::Statement` because changing the SQL shape would
-change behavior:
+Ordinary application persistence uses SeaORM. Some bridge operations deliberately
+use parameterized `sea_orm::Statement` values because changing their SQL shape
+would change behavior:
 
 - bounded per-channel restore uses a window function;
 - channel batches use PostgreSQL text arrays;
@@ -48,7 +37,8 @@ change behavior:
 - shared context rejects stale writes with an optimistic version guard;
 - channel IDs are resolved inside the same write statement.
 
-Values remain bound separately from SQL. No caller value is interpolated.
+Values remain separately bound. No caller value is interpolated into SQL.
+Direct application dependencies on SQLx or `tokio-postgres` are forbidden.
 
 ## Restart guarantees
 
@@ -66,24 +56,16 @@ overwrite a newer version.
 
 ## DPM workflow
 
-Render and review schema changes from the public desired-state file:
+Render and review schema changes from the repository-owned desired-state file:
 
 ```sh
 dpm diff --source persistence/agent-pontifex-persistence/schema.sql
 dpm verify --source persistence/agent-pontifex-persistence/schema.sql
 dpm review --source persistence/agent-pontifex-persistence/schema.sql
 # dpm apply --source persistence/agent-pontifex-persistence/schema.sql
-Review schema changes in the shared repository:
-
-```sh
-cd vendor/k8s-libs-and-shared-defs/pg-defs
-scripts/dpm.sh diff
-scripts/dpm.sh verify
-scripts/dpm.sh review
-# scripts/dpm.sh apply  # explicit human action only
 ```
 
-Destructive changes require both reviewed DPM consent flags. Neither DPM nor an
+Destructive changes require the reviewed DPM consent flags. Neither DPM nor an
 ORM migration command belongs in bridge startup or deployment arguments.
 
 ## Local and CI verification
@@ -94,13 +76,7 @@ Initialize only the public tool submodule, then run:
 git submodule update --init --depth=1 -- vendor/flags-2-env
 node --test scripts/seaorm-policy.test.mjs
 node scripts/check-seaorm-policy.mjs
-Initialize submodules, then run:
-
-```sh
-git submodule update --init --recursive
-node --test scripts/seaorm-policy.test.mjs
-EXPECTED_SHARED_COMMIT=3c84cab532b27d328378f09fba5841f02644ae3b \
-  node scripts/check-seaorm-policy.mjs
+cargo fmt --all -- --check
 cargo clippy --all-targets --locked --features postgres -- -D warnings
 cargo test --all-targets --locked
 cargo check --all-targets --locked --features postgres
@@ -116,24 +92,14 @@ dpm bootstrap --source persistence/agent-pontifex-persistence/schema.sql \
 cargo test --locked --features postgres --test postgres_restart -- --ignored
 ```
 
-A successful persistence PR must also be grep-clean for direct SQLx pool/query,
-private schema checkout, recursive submodule checkout, or boot-migration calls.
-The SeaORM feature string `sqlx-postgres` is the expected transport backend and
-is not a direct SQLx application dependency.
-bootstrap output for the canonical schema:
-
-```sh
-export FIDUCIA_BRIDGE_TEST_DATABASE_URL=postgresql://...
-cargo test --locked --features postgres --test postgres_restart -- --ignored
-```
-
-A successful migration PR must also be grep-clean for direct SQLx pool/query or
-boot-migration calls. The SeaORM feature string `sqlx-postgres` is the expected
-transport backend and is not a direct SQLx application dependency.
+A successful persistence change must also be grep-clean for direct SQLx
+pool/query calls, private schema checkout, recursive submodule checkout, and
+boot-migration calls. The SeaORM feature string `sqlx-postgres` is its expected
+transport backend; it is not a direct SQLx application dependency.
 
 ## UI boundary
 
 Maud + HTMX, Leptos, and Dioxus are page-level rendering choices over this same
 repository and schema. A Leptos analytics page or Dioxus activity page must
-reuse the bridge's SeaORM/auth/owner-scope boundary rather than introduce a
-second SQLx store.
+reuse the bridge's SeaORM, authentication, and owner-scope boundary rather than
+introduce a second persistence authority.
