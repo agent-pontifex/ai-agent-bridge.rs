@@ -75,6 +75,14 @@ jobs:
           if old_digest not in views:
               raise SystemExit("expected event digest formatter was not found")
           views_path.write_text(views.replace(old_digest, new_digest, 1))
+
+          for path in (Path("src/slack_bridge.rs"), Path("src/slack_commands_parts/part1.rs")):
+              source = path.read_text()
+              old_import = "use hmac::{Hmac, Mac};"
+              new_import = "use hmac::{Hmac, KeyInit, Mac};"
+              if old_import not in source:
+                  raise SystemExit(f"expected HMAC import was not found in {path}")
+              path.write_text(source.replace(old_import, new_import, 1))
           PY
 
       - name: Regenerate, format, and verify
@@ -92,6 +100,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm .github/workflows/den-1873-repair.yml
-          git add Cargo.toml Cargo.lock src/types.rs src/live_sessions/views.rs
+          git add Cargo.toml Cargo.lock src/types.rs src/live_sessions/views.rs src/slack_bridge.rs src/slack_commands_parts/part1.rs
           git commit -m "fix: restore bridge compatibility for DEN-1873"
           git push origin HEAD:feat/den-1873-live-session-compat
