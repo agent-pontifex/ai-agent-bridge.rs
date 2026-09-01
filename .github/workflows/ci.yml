@@ -37,7 +37,7 @@ jobs:
           --health-retries 10
     env:
       DPM_INSTALLER_COMMIT: f7180770fc0c7a3dbf9b83dcdc2ac6255da31ffc
-      EXPECTED_FLAGS_COMMIT: 16fbd8b724e76990e9dcf6237bf44528433b09b1
+      EXPECTED_FLAGS_COMMIT: 8c8465561075a8d7ebb58074b3a8087138e97d8f
       FIDUCIA_BRIDGE_TEST_DATABASE_URL: postgresql://bridge:bridge-test-only@localhost:5432/bridge_restart
       SHADOW_DATABASE_URL: postgresql://bridge:bridge-test-only@localhost:5432/postgres
     steps:
