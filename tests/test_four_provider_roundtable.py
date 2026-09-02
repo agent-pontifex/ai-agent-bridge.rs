@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import importlib
 import importlib.util
 import json
@@ -7,6 +8,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -20,6 +22,8 @@ roundtable = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = roundtable
 SPEC.loader.exec_module(roundtable)
 common = importlib.import_module("agent_pontifex_roundtable.common")
+bridge_module = importlib.import_module("agent_pontifex_roundtable.bridge")
+providers_module = importlib.import_module("agent_pontifex_roundtable.providers")
 
 
 class FourProviderRoundtableTests(unittest.TestCase):
@@ -241,6 +245,127 @@ class FourProviderRoundtableTests(unittest.TestCase):
             roundtable.provider_response_text("gemini_generate_content", gemini),
             "observable answer",
         )
+
+    def test_provider_binding_rejects_arbitrary_secret_environment_routing(self) -> None:
+        spec = copy.deepcopy(self.by_protocol["openai_responses"])
+        spec["credential_env"] = "GITHUB_TOKEN"
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "must-never-leave"}, clear=True):
+            with patch.object(providers_module, "json_request") as request:
+                with self.assertRaisesRegex(
+                    roundtable.ConformanceError,
+                    "must use credential environment variable 'OPENAI_API_KEY'",
+                ) as raised:
+                    roundtable.invoke_provider(
+                        spec,
+                        "observable prompt",
+                        "live",
+                        (),
+                    )
+        request.assert_not_called()
+        self.assertNotIn("must-never-leave", str(raised.exception))
+
+    def test_provider_binding_rejects_cross_provider_protocol_swap(self) -> None:
+        spec = copy.deepcopy(self.by_protocol["openai_responses"])
+        spec["protocol"] = "xai_chat_completions"
+        with self.assertRaisesRegex(
+            roundtable.ConformanceError,
+            "must use protocol 'openai_responses'",
+        ):
+            roundtable.invoke_provider(spec, "observable prompt", "mock", ())
+
+    def test_bridge_json_and_sse_redirects_do_not_forward_bearer(self) -> None:
+        forwarded_authorization: list[str | None] = []
+        collector = None
+
+        class SinkHandler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802
+                forwarded_authorization.append(self.headers.get("Authorization"))
+                payload = b"unexpected redirect target"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, _format: str, *_args: object) -> None:
+                return
+
+        sink = ThreadingHTTPServer(("127.0.0.1", 0), SinkHandler)
+
+        class RedirectHandler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802
+                self.send_response(302)
+                self.send_header(
+                    "Location",
+                    f"http://127.0.0.1:{sink.server_port}/capture",
+                )
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            def log_message(self, _format: str, *_args: object) -> None:
+                return
+
+        redirect = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+        sink_thread = threading.Thread(target=sink.serve_forever, daemon=True)
+        redirect_thread = threading.Thread(target=redirect.serve_forever, daemon=True)
+        sink_thread.start()
+        redirect_thread.start()
+        bearer = "bridge-bearer-must-not-forward"
+        base_url = f"http://127.0.0.1:{redirect.server_port}"
+        try:
+            client = bridge_module.BridgeClient(base_url, bearer)
+            with self.assertRaises(common.HttpJsonError) as raised:
+                client.request("/redirect")
+            self.assertEqual(raised.exception.payload["error"], "redirect_rejected")
+
+            collector = bridge_module.SSECollector(
+                base_url,
+                bearer,
+                "roundtable-room",
+                "redirect-test",
+            )
+            collector.start()
+            self.assertTrue(collector.ready.wait(timeout=3))
+            deadline = time.monotonic() + 3
+            while not collector.errors and time.monotonic() < deadline:
+                time.sleep(0.025)
+            self.assertTrue(collector.errors, "SSE redirect was not rejected")
+            rendered = "\n".join(collector.errors)
+            self.assertIn("redirect_rejected", rendered)
+            self.assertNotIn(bearer, rendered)
+            self.assertEqual(forwarded_authorization, [])
+        finally:
+            if collector is not None:
+                collector.stop()
+            redirect.shutdown()
+            redirect.server_close()
+            sink.shutdown()
+            sink.server_close()
+            redirect_thread.join(timeout=5)
+            sink_thread.join(timeout=5)
+
+    def test_bridge_origin_and_resume_cursor_fail_closed(self) -> None:
+        for base_url in (
+            "http://user@127.0.0.1:18142",
+            "http://127.0.0.1:18142/prefix",
+            "http://127.0.0.1:18142?query=1",
+            "http://127.0.0.1:18142#fragment",
+        ):
+            with self.subTest(base_url=base_url):
+                with self.assertRaises(roundtable.ConformanceError):
+                    bridge_module.BridgeClient(base_url, "non-empty")
+        with self.assertRaises(roundtable.ConformanceError):
+            bridge_module.BridgeClient("http://127.0.0.1:18142", "")
+        for after_seq in (-1, True):
+            with self.subTest(after_seq=after_seq):
+                with self.assertRaises(roundtable.ConformanceError):
+                    bridge_module.SSECollector(
+                        "http://127.0.0.1:18142",
+                        "non-empty",
+                        "room",
+                        "invalid-resume",
+                        after_seq=after_seq,
+                    )
 
 
 if __name__ == "__main__":
