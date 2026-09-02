@@ -14,10 +14,36 @@ from .common import (
     sha256_text,
 )
 
+EXPECTED_PROVIDER_BINDINGS = {
+    "openai": ("openai_responses", "OPENAI_API_KEY"),
+    "anthropic": ("anthropic_messages", "ANTHROPIC_API_KEY"),
+    "google": ("gemini_generate_content", "GEMINI_API_KEY"),
+    "xai": ("xai_chat_completions", "XAI_API_KEY"),
+}
+
+
+def validate_provider_binding(spec: dict[str, Any]) -> None:
+    """Reject protocol or credential routing that could redirect a secret."""
+
+    provider = spec.get("provider")
+    if not isinstance(provider, str) or provider not in EXPECTED_PROVIDER_BINDINGS:
+        raise ConformanceError(f"unsupported provider binding {provider!r}")
+    expected_protocol, expected_credential_env = EXPECTED_PROVIDER_BINDINGS[provider]
+    if spec.get("protocol") != expected_protocol:
+        raise ConformanceError(
+            f"provider {provider!r} must use protocol {expected_protocol!r}"
+        )
+    if spec.get("credential_env") != expected_credential_env:
+        raise ConformanceError(
+            f"provider {provider!r} must use credential environment variable "
+            f"{expected_credential_env!r}"
+        )
+
 
 def provider_request(
     spec: dict[str, Any], prompt: str, api_key: str
 ) -> tuple[str, dict[str, str], dict[str, Any]]:
+    validate_provider_binding(spec)
     protocol = spec["protocol"]
     model = spec["model"]
     if protocol == "openai_responses":
@@ -114,6 +140,7 @@ def provider_response_text(protocol: str, payload: dict[str, Any]) -> str:
 def invoke_provider(
     spec: dict[str, Any], prompt: str, mode: str, visible_peers: tuple[str, ...]
 ) -> ProviderResult:
+    validate_provider_binding(spec)
     prompt_digest = sha256_text(prompt)
     if mode == "mock":
         peer_text = ",".join(visible_peers) if visible_peers else "none"
