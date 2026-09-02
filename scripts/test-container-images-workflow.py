@@ -8,7 +8,6 @@ the requested GHCR token scope derived from the repository's current owner.
 """
 from __future__ import annotations
 
-import re
 import unittest
 from pathlib import Path
 
@@ -21,11 +20,29 @@ class ContainerImagesWorkflowTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.text = WORKFLOW.read_text(encoding="utf-8")
 
+    def named_step(self, name: str) -> str:
+        marker = f"      - name: {name}\n"
+        self.assertIn(marker, self.text)
+        remainder = self.text.split(marker, 1)[1]
+        boundaries = [
+            position
+            for position in (
+                remainder.find("\n      - name:"),
+                remainder.find("\n      - uses:"),
+            )
+            if position >= 0
+        ]
+        return remainder[: min(boundaries)] if boundaries else remainder
+
     def test_package_write_permission_is_explicit(self) -> None:
-        self.assertRegex(
-            self.text,
-            r"(?ms)^permissions:\s*\n(?:^[ \t]+.*\n)*?^[ \t]+packages:[ \t]+write\s*$",
-        )
+        marker = "\npermissions:\n"
+        self.assertIn(marker, self.text)
+        permissions = self.text.split(marker, 1)[1].split("\n\n", 1)[0]
+        permission_lines = {
+            line.strip() for line in permissions.splitlines() if line.strip()
+        }
+        self.assertIn("contents: read", permission_lines)
+        self.assertIn("packages: write", permission_lines)
 
     def test_image_namespace_tracks_current_repository_owner(self) -> None:
         self.assertIn(
@@ -40,21 +57,21 @@ class ContainerImagesWorkflowTests(unittest.TestCase):
         )
 
     def test_no_legacy_ghcr_owner_is_hard_coded(self) -> None:
-        self.assertNotRegex(self.text.lower(), r"ghcr\.io/(?:oresoftware|fiducia-cloud)/")
-        self.assertNotRegex(
-            self.text.lower(),
-            r"scope:\s*(?:oresoftware|fiducia-cloud)/",
-        )
+        lowered = self.text.lower()
+        for former_owner in ("oresoftware", "fiducia-cloud"):
+            with self.subTest(former_owner=former_owner):
+                self.assertNotIn(f"ghcr.io/{former_owner}/", lowered)
+                self.assertNotIn(f"scope: {former_owner}/", lowered)
 
     def test_publish_and_login_remain_push_only(self) -> None:
-        guarded_steps = re.findall(
-            r"(?ms)^      - name: (Log in to GitHub Container Registry|Publish digest-addressable image with SBOM and provenance)\n(.*?)(?=^      - name:|\Z)",
-            self.text,
-        )
-        self.assertEqual(len(guarded_steps), 2)
-        for name, body in guarded_steps:
+        for name in (
+            "Log in to GitHub Container Registry",
+            "Publish digest-addressable image with SBOM and provenance",
+        ):
             with self.subTest(step=name):
-                self.assertIn("if: github.event_name == 'push'", body)
+                self.assertIn(
+                    "if: github.event_name == 'push'", self.named_step(name)
+                )
 
     def test_pull_requests_still_build_and_scan_without_publishing(self) -> None:
         self.assertIn("push: false", self.text)
