@@ -8,15 +8,35 @@ import urllib.parse
 import urllib.request
 from typing import Any, Callable
 
-from .common import ConformanceError, json_request
+from .common import ConformanceError, RejectRedirects, json_request
+
+
+def normalize_loopback_base_url(base_url: str) -> str:
+    """Accept only a root loopback HTTP origin with no credential-bearing URL parts."""
+
+    parsed = urllib.parse.urlsplit(base_url)
+    try:
+        parsed.port
+    except ValueError as error:
+        raise ConformanceError("conformance bridge URL has an invalid port") from error
+    if parsed.scheme != "http" or parsed.hostname not in {
+        "127.0.0.1",
+        "localhost",
+        "::1",
+    }:
+        raise ConformanceError("conformance bridge URL must be loopback HTTP")
+    if parsed.username is not None or parsed.password is not None:
+        raise ConformanceError("conformance bridge URL must not contain user information")
+    if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+        raise ConformanceError("conformance bridge URL must be a root origin")
+    return base_url.rstrip("/")
 
 
 class BridgeClient:
     def __init__(self, base_url: str, bearer: str):
-        parsed = urllib.parse.urlsplit(base_url)
-        if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost"}:
-            raise ConformanceError("conformance bridge URL must be loopback HTTP")
-        self.base_url = base_url.rstrip("/")
+        if not bearer:
+            raise ConformanceError("conformance bridge bearer must be non-empty")
+        self.base_url = normalize_loopback_base_url(base_url)
         self.bearer = bearer
 
     def request(self, path: str, *, method: str = "GET", body: Any | None = None) -> Any:
@@ -26,6 +46,7 @@ class BridgeClient:
             headers={"Authorization": f"Bearer {self.bearer}"},
             body=body,
             timeout=30.0,
+            reject_redirects=True,
         )
 
     def register(self, spec: dict[str, Any]) -> None:
@@ -97,8 +118,13 @@ class BridgeClient:
 
 class SSECollector:
     def __init__(self, base_url: str, bearer: str, slug: str, name: str, after_seq: int = 0):
+        if not bearer:
+            raise ConformanceError("conformance bridge bearer must be non-empty")
+        if not isinstance(after_seq, int) or isinstance(after_seq, bool) or after_seq < 0:
+            raise ConformanceError("SSE resume sequence must be a non-negative integer")
+        base_url = normalize_loopback_base_url(base_url)
         quoted = urllib.parse.quote(slug, safe="")
-        self.url = f"{base_url.rstrip('/')}/live-sessions/{quoted}/stream?after_seq={after_seq}"
+        self.url = f"{base_url}/live-sessions/{quoted}/stream?after_seq={after_seq}"
         self.bearer = bearer
         self.name = name
         self.frames: list[tuple[dict[str, Any], float]] = []
@@ -146,8 +172,9 @@ class SSECollector:
                 "Cache-Control": "no-cache",
             },
         )
+        opener = urllib.request.build_opener(RejectRedirects())
         try:
-            with urllib.request.urlopen(request, timeout=300) as response:
+            with opener.open(request, timeout=300) as response:
                 self._response = response
                 self.ready.set()
                 for raw_line in response:
@@ -170,4 +197,3 @@ class SSECollector:
         finally:
             self._response = None
             self.ready.set()
-
