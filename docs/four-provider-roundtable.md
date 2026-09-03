@@ -54,3 +54,7 @@ kill "$bridge_pid"
 ```
 
 The bearer and provider keys are accepted only through environment variables, never command-line arguments. GitHub and Linear remain the durable human-visible ledgers. The live room transports externally observable coordination; it does not confer tool authority or permission for irreversible writes.
+
+## Main-branch certification carrier — 2026-09-02
+
+This documentation-only branch requests a fresh credential-free pull-request run against bridge `main` commit `2b71a89002511d10f16b081e8cd3c80a0ed3c512`. It changes no runtime, protocol, provider, persistence, or deployment behavior and does not authorize the protected real-provider lane. The resulting exact-head workflow and metadata-only artifact are the evidence authority for this certification.
