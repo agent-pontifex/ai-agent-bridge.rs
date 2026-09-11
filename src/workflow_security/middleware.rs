@@ -173,6 +173,18 @@ fn access_rule(method: &Method, path: &str) -> Option<AccessRule> {
             scope: "channel:read",
             identity_field: None,
         },
+        (&Method::POST, path)
+            if path.starts_with("/live-sessions/") && path.ends_with("/events") =>
+        {
+            AccessRule {
+                scope: "channel:post",
+                identity_field: Some("sender"),
+            }
+        }
+        (&Method::GET, path) if path.starts_with("/live-sessions/") => AccessRule {
+            scope: "channel:read",
+            identity_field: None,
+        },
         (&Method::GET, path)
             if path.starts_with("/channels/")
                 && !path.ends_with("/context")

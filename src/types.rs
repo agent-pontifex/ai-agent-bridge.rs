@@ -17,9 +17,11 @@ pub fn new_id() -> String {
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentKind {
+    ChatGpt,
     Claude,
     Codex,
     Gemini,
+    Grok,
     Kimi,
     Qwen,
     Human,
@@ -170,4 +172,73 @@ pub enum Event {
         member_count: usize,
         at: Timestamp,
     },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WorkflowParticipant {
+    pub agent_key: String,
+    pub role: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WorkflowArtifact {
+    pub artifact_id: String,
+    pub name: String,
+    pub repository: String,
+    pub path: String,
+    pub owner_agent_key: String,
+    pub summary: String,
+    pub expected_content_types: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WorkflowArtifactSubmission {
+    pub artifact_id: String,
+    pub name: String,
+    pub repository: String,
+    pub path: String,
+    pub owner_agent_key: String,
+    pub summary: String,
+    pub content_type: String,
+    pub contents: String,
+    pub sha256: String,
+    pub byte_len: u64,
+    pub submitted_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WorkflowPlan {
+    pub workflow_id: String,
+    pub channel: String,
+    pub objective: String,
+    pub created_by: String,
+    pub coordinator_agent_key: Option<String>,
+    pub dependency_order: Vec<String>,
+    pub participants: Vec<WorkflowParticipant>,
+    pub artifacts: Vec<WorkflowArtifact>,
+    pub created_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WorkflowStatus {
+    pub workflow_id: String,
+    pub channel: String,
+    pub artifact_total: usize,
+    pub artifact_submitted: usize,
+    pub pending_artifact_ids: Vec<String>,
+    pub complete: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WorkflowArtifactResponse {
+    pub workflow_id: String,
+    pub artifact: WorkflowArtifactSubmission,
+    pub replaced: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WorkflowArtifactContentResponse {
+    pub workflow_id: String,
+    pub artifact: WorkflowArtifact,
+    pub submission: WorkflowArtifactSubmission,
 }

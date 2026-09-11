@@ -1,0 +1,127 @@
+name: Live four-provider roundtable
+
+on:
+  workflow_dispatch:
+    inputs:
+      authorize_live_provider_calls:
+        description: "Authorize the bounded provider calls and associated API spend"
+        required: true
+        type: boolean
+        default: false
+      acknowledge_model_substitutions:
+        description: "Use Gemini 3.1 Pro Preview for requested Gemini 3.6 Pro and the declared OpenAI Sol endpoint"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-four-provider-roundtable
+  cancel-in-progress: false
+
+jobs:
+  live-provider-e2e:
+    environment: live-provider-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Require explicit call and substitution authorization
+        shell: bash
+        env:
+          LIVE_CALLS_AUTHORIZED: ${{ inputs.authorize_live_provider_calls }}
+          SUBSTITUTIONS_ACKNOWLEDGED: ${{ inputs.acknowledge_model_substitutions }}
+        run: |
+          set -euo pipefail
+          test "$LIVE_CALLS_AUTHORIZED" = true
+          test "$SUBSTITUTIONS_ACKNOWLEDGED" = true
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: "1.95.0"
+
+      - name: Validate adapter code and build the Rust bridge
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/four_provider_roundtable.py scripts/agent_pontifex_roundtable/*.py tests/test_four_provider_roundtable.py
+          python3 -m unittest tests/test_four_provider_roundtable.py -v
+          cargo build --locked --bin fiducia-ai-agent-bridge
+
+      - name: Run bounded live provider exchange through the isolated Rust bridge
+        shell: bash
+        env:
+          AGENT_PONTIFEX_BRIDGE_BEARER: agent-pontifex-live-roundtable-only
+          AGENT_PONTIFEX_ALLOW_LIVE_PROVIDER_CALLS: "1"
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+        run: |
+          set -euo pipefail
+          for name in OPENAI_API_KEY ANTHROPIC_API_KEY GEMINI_API_KEY XAI_API_KEY; do
+            test -n "${!name:-}" || {
+              echo "required provider credential is not configured: ${name}" >&2
+              exit 1
+            }
+          done
+
+          state_dir="${RUNNER_TEMP}/agent-pontifex-live-roundtable-state"
+          bridge_log="${RUNNER_TEMP}/live-four-provider-bridge.log"
+          mkdir -p "$state_dir" artifacts
+
+          # Provider credentials remain available to the harness but are
+          # explicitly removed from the Rust bridge process environment.
+          env \
+            -u OPENAI_API_KEY \
+            -u ANTHROPIC_API_KEY \
+            -u GEMINI_API_KEY \
+            -u XAI_API_KEY \
+            HOST=127.0.0.1 \
+            HTTP_PORT=18142 \
+            TCP_PORT=0 \
+            API_AUTH_BEARER="$AGENT_PONTIFEX_BRIDGE_BEARER" \
+            AI_AGENT_BRIDGE_DIR="$state_dir" \
+            RUST_LOG=info \
+            target/debug/fiducia-ai-agent-bridge >"$bridge_log" 2>&1 &
+          bridge_pid=$!
+          cleanup() {
+            kill "$bridge_pid" 2>/dev/null || true
+            wait "$bridge_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT INT TERM
+
+          for _ in $(seq 1 120); do
+            if curl --fail --silent http://127.0.0.1:18142/healthz >/dev/null; then
+              break
+            fi
+            if ! kill -0 "$bridge_pid" 2>/dev/null; then
+              echo "bridge exited before healthz became ready; live log retained only on the ephemeral runner" >&2
+              exit 1
+            fi
+            sleep 0.25
+          done
+          curl --fail --silent http://127.0.0.1:18142/healthz >/dev/null
+
+          python3 scripts/four_provider_roundtable.py \
+            --mode live \
+            --acknowledge-substitutions \
+            --bridge-url http://127.0.0.1:18142 \
+            --timeout-seconds 120 \
+            --evidence-out artifacts/live-four-provider-roundtable.json
+
+      - name: Upload metadata-only live evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: live-four-provider-roundtable-${{ github.run_id }}
+          path: artifacts/live-four-provider-roundtable.json
+          if-no-files-found: warn
+          retention-days: 14

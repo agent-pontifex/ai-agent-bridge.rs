@@ -92,4 +92,22 @@ mod tests {
             "key": "shared.root-cause"
         }))));
     }
+
+    #[test]
+    fn live_session_routes_require_channel_scopes_and_sender_binding() {
+        let publish = access_rule(&Method::POST, "/live-sessions/review/events").unwrap();
+        assert_eq!(publish.scope, "channel:post");
+        assert_eq!(publish.identity_field, Some("sender"));
+
+        for path in [
+            "/live-sessions/review",
+            "/live-sessions/review/events",
+            "/live-sessions/review/stream",
+        ] {
+            let read = access_rule(&Method::GET, path).unwrap();
+            assert_eq!(read.scope, "channel:read");
+            assert_eq!(read.identity_field, None);
+        }
+        assert!(access_rule(&Method::DELETE, "/live-sessions/review").is_none());
+    }
 }

@@ -8,8 +8,8 @@ use ai_agent_bridge::config::Config;
 use ai_agent_bridge::embed::Embedder;
 use ai_agent_bridge::state::AppState;
 use ai_agent_bridge::{
-    assignment_claims, blind_competition, http, lease_descriptors, lease_renewal, metrics,
-    orchestration, policy, policy_admission, tcp, workflow_security,
+    assignment_claims, blind_competition, http, lease_descriptors, lease_renewal, live_sessions,
+    metrics, orchestration, policy, policy_admission, tcp, workflow_security,
 };
 use axum::extract::State;
 use axum::http::{header, StatusCode};
@@ -66,6 +66,7 @@ async fn main() -> anyhow::Result<()> {
 
     let http_admission = Arc::new(Semaphore::new(MAX_HTTP_IN_FLIGHT));
     let app = http::router(state.clone())
+        .merge(live_sessions::router(state.clone()))
         .merge(orchestration::router(state.clone()))
         .merge(policy::router())
         .merge(policy_admission::router(state.clone()))

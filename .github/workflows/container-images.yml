@@ -9,6 +9,7 @@ on:
       - Cargo.lock
       - src/**
       - persistence/**
+      - scripts/test-container-images-workflow.py
       - .github/workflows/container-images.yml
   push:
     branches: [main]
@@ -48,6 +49,9 @@ jobs:
           persist-credentials: false
           show-progress: false
 
+      - name: Verify registry ownership and publish guards
+        run: python3 scripts/test-container-images-workflow.py
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
 
@@ -55,7 +59,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
-          images: ghcr.io/oresoftware/${{ matrix.image }}
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
           flavor: latest=false
           tags: |
             type=sha,format=long
@@ -105,7 +109,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-          scope: oresoftware/${{ matrix.image }}@push
+          scope: ${{ github.repository_owner }}/${{ matrix.image }}@push
 
       - name: Publish digest-addressable image with SBOM and provenance
         id: publish

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "agent-pontifex.repository-lineage.v1",
+  "repository": "agent-pontifex/ai-agent-bridge.rs",
+  "status": "active-divergent",
+  "deprecationAllowed": false,
+  "peerRepository": "ORESoftware/ai-agent-bridge.rs",
+  "artifactIdentity": {
+    "status": "unresolved-legacy",
+    "cargoPackage": "fiducia-ai-agent-bridge",
+    "cargoRepository": "https://github.com/fiducia-cloud/fiducia-ai-agent-bridge.rs"
+  },
+  "capabilitiesToPreserveHere": [
+    "agent-pontifex-persistence",
+    "four-provider-roundtable",
+    "replay-safe-live-session",
+    "slack-ingress-security"
+  ],
+  "peerCapabilitiesToPreserve": [
+    "bounded-activation-canary",
+    "fleet-runtime-activation"
+  ],
+  "canonicalizationGates": [
+    "inventory-active-deployments-and-release-authorities",
+    "compare-divergent-history-and-public-contracts",
+    "choose-and-reserve-final-artifact-identities",
+    "preserve-unique-capabilities-with-cross-repository-tests",
+    "update-all-consumers-manifests-and-package-references",
+    "prove-cutover-rollback-and-no-dual-writer-window",
+    "freeze-retired-line-before-publishing-deprecation-notice"
+  ]
+}

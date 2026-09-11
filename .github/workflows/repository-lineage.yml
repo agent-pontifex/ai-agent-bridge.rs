@@ -1,0 +1,54 @@
+name: bridge repository lineage
+
+on:
+  pull_request:
+    paths:
+      - repository-lineage.json
+      - agents.md
+      - AGENTS.md
+      - README.md
+      - Cargo.toml
+      - DEPRECATED.md
+      - docs/repository-lineage.md
+      - scripts/validate_repository_lineage.py
+      - tests/test_repository_lineage.py
+      - .github/workflows/repository-lineage.yml
+  push:
+    branches: [main]
+    paths:
+      - repository-lineage.json
+      - agents.md
+      - AGENTS.md
+      - README.md
+      - Cargo.toml
+      - DEPRECATED.md
+      - docs/repository-lineage.md
+      - scripts/validate_repository_lineage.py
+      - tests/test_repository_lineage.py
+      - .github/workflows/repository-lineage.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repository-lineage-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Validate active divergent lineage
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/validate_repository_lineage.py tests/test_repository_lineage.py
+          python3 scripts/validate_repository_lineage.py
+          python3 -m unittest -v tests/test_repository_lineage.py

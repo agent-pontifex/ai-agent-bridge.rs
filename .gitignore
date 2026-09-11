@@ -45,3 +45,16 @@ tests/blockkit/artifacts/
 tests/blockkit/playwright-report/
 tests/blockkit/test-results/
 tests/blockkit/package-lock.json
+
+# --- environment / secrets (sops + age) -------------------------------------
+# Only env/enc/*.env.enc is tracked. Every plaintext form stays out of git;
+# `just env-check` enforces it. See env/README.md.
+*.env
+**/*.env
+env/dec/
+
+# age private keys — never commit these.
+*.agekey
+*.age-key
+keys.txt
+sops-private*.txt
