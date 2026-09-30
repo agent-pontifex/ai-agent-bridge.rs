@@ -26,11 +26,14 @@ if not paths:
 for path in paths:
     rel = path.relative_to(ROOT)
     lines = path.read_text(encoding="utf-8").splitlines()
+    jobs_index = next((i for i, line in enumerate(lines) if line == "jobs:"), None)
+    if jobs_index is None:
+        errors.append(f"{rel}: workflow has no jobs block")
+        continue
 
-    # Organization policy: repository-wide workflow permission defaults must be
-    # read-only. A narrowly scoped job can request a write permission only in
-    # the workflow that actually performs that mutation.
-    jobs_index = next((i for i, line in enumerate(lines) if line == "jobs:"), len(lines))
+    # Repository-wide workflow permission defaults must be read-only. A
+    # mutation-capable workflow can grant write access only at the specific job
+    # that performs the reviewed mutation.
     for i, line in enumerate(lines[:jobs_index], 1):
         if re.match(r"^\s+[A-Za-z-]+:\s*write\s*(?:#.*)?$", line):
             errors.append(f"{rel}:{i}: top-level write permission is forbidden; scope it to one job")
@@ -71,10 +74,14 @@ for path in paths:
         if re.search(r"\b(?:ubuntu|macos|windows)-latest\b", line):
             errors.append(f"{rel}:{i}: moving runner label is forbidden; pin an explicit runner image")
 
-    # Every ordinary job gets a bounded runtime. Reusable-workflow jobs (`uses:`
-    # directly under the job) are exempt because GitHub does not accept a
-    # timeout-minutes key on those call sites; the called workflow must bound itself.
-    job_starts = [(i, JOB.match(line).group(1)) for i, line in enumerate(lines) if JOB.match(line)]
+    # Only inspect keys inside the jobs mapping. Event-trigger keys above jobs:
+    # are not jobs and must never produce timeout findings.
+    job_lines = lines[jobs_index + 1 :]
+    job_starts = [
+        (jobs_index + 1 + i, JOB.match(line).group(1))
+        for i, line in enumerate(job_lines)
+        if JOB.match(line)
+    ]
     for index, (start, name) in enumerate(job_starts):
         end = job_starts[index + 1][0] if index + 1 < len(job_starts) else len(lines)
         block = lines[start + 1 : end]
