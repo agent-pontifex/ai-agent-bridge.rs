@@ -6,11 +6,12 @@ on:
   pull_request:
   push:
     branches:
+      - dev
       - main
       - agent/den-1227-runner-prometheus-metrics
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -18,8 +19,8 @@ concurrency:
 
 jobs:
   test:
-    if: github.event_name == 'pull_request' || github.ref_name == 'main'
-    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.ref_name == 'dev' || github.ref_name == 'main'
+    runs-on: ubuntu-24.04
     timeout-minutes: 55
     services:
       postgres:
@@ -144,7 +145,7 @@ jobs:
       - run: vendor/flags-2-env/build/flags2env audit .cli-flags.toml
 
   browser-registry:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

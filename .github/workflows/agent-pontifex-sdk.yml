@@ -6,7 +6,7 @@ on:
       - sdk/**
       - .github/workflows/agent-pontifex-sdk.yml
   push:
-    branches: [main]
+    branches: [dev, main]
     paths:
       - sdk/**
       - .github/workflows/agent-pontifex-sdk.yml
@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Check out exact source

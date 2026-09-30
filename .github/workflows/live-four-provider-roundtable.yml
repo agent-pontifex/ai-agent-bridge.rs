@@ -24,7 +24,7 @@ concurrency:
 jobs:
   live-provider-e2e:
     environment: live-provider-smoke
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - name: Require explicit call and substitution authorization

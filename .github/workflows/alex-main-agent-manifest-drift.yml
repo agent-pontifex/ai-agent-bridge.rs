@@ -11,7 +11,7 @@ on:
       - scripts/audit_alex_main_agent_manifests.py
       - tests/test_audit_alex_main_agent_manifests.py
   push:
-    branches: [main]
+    branches: [dev, main]
     paths:
       - .github/workflows/alex-main-agent-manifest-drift.yml
       - config/alex-main-agent.channels.json
@@ -33,7 +33,7 @@ concurrency:
 
 jobs:
   audit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
       CROSS_ORG_AUDIT_TOKEN: ${{ secrets.ALEX_MAIN_AGENT_MANIFEST_AUDIT_TOKEN }}

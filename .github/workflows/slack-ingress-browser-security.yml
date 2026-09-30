@@ -13,7 +13,7 @@ on:
       - src/slack_commands_parts/**
       - tests/browser/**
   push:
-    branches: [main]
+    branches: [dev, main]
     paths:
       - .github/workflows/slack-ingress-browser-security.yml
       - Cargo.lock
@@ -35,7 +35,7 @@ concurrency:
 
 jobs:
   chromium-security:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
       SLACK_COMMAND_BASE_URL: http://127.0.0.1:8151
